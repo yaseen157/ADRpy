@@ -6,6 +6,8 @@ Aircraft Design Recipes in Python
 [![PyPI version](https://badge.fury.io/py/ADRpy.svg)](https://badge.fury.io/py/ADRpy)
 [![Build Status](https://travis-ci.com/sobester/ADRpy.svg?branch=master)](https://travis-ci.com/sobester/ADRpy)
 
+#  This fork of the ADRpy repository is archived and no longer under development by myself
+
 A library of aircraft conceptual design and performance analysis tools, including
 virtual (design) atmospheres, constraint analysis methods, propulsion system 
 performance models, conversion functions and much else.
