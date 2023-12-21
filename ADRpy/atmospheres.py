@@ -1,39 +1,9 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
-.. _atmospheres_module:
-
-Atmospheres
------------
-
 This module contains tools for defining the environment in which
 aircraft performance analyses, trade-off studies, conceptual sizing
 and other aircraft engineering calculations can be carried out.
 
-The module contains the following class definitions:
-
-``Runway``
-    Definition of a runway object, including the capability to instantiate
-    a runway from a 'real world' database of the world's airports.
-``Atmosphere``
-    Definition of a virtual atmosphere object. This includes a number of
-    methods that allow the user to query parameters of the atmosphere.
-``Obsprofile``
-    Definition of an atmospheric observation (sounding) object. This
-    allows the user to create bespoke atmospheres and any other
-    atmospheres derived from specified temperature, pressure, etc.
-    profiles (such as the MIL HDBK 310 atmospheres).
-
-See, in what follows, detailed descriptions of these classes, their methods,
-functions, as well as usage examples.
-
 """
-
-__author__ = "Andras Sobester"
-
-
-import math
 from numbers import Number
 import warnings
 import csv
@@ -43,9 +13,7 @@ from scipy import interpolate
 from ADRpy import unitconversions as co
 from ADRpy import mtools4acdc as mtools
 
-# pylint: disable=locally-disabled, too-many-instance-attributes, too-few-public-methods
-# pylint: disable=locally-disabled, too-many-arguments, too-many-statements
-# pylint: disable-msg=R0914
+__author__ = "Andras Sobester"
 
 # Specific gas constant for dry air
 # (in Joules ) per kilogram per Kelvin
@@ -56,90 +24,134 @@ R_EARTH_M = 6356766
 # Dry air ratio of specific heats
 GAMMA_DRY_AIR = 1.401
 
+
 def idealgasdens_kgm3(p_pa, temp_k):
+    """
+    Computes density from pressure and temperature, using ideal gas assumptions.
+
+    Args:
+        p_pa: The pressure, in Pascal.
+        temp_k: The temperature, in Kelvin.
+
+    Returns:
+        Density, in kilograms per metre cubed.
+
+    """
     """Density from pressure and temperature, on ideal gas assumption"""
     return p_pa / R_JPKGPK / temp_k
 
+
 def idealgaspress_pa(rho_kgpm3, temp_k):
-    """Pressure from density and temperature, on ideal gas assumption"""
+    """
+    Computes pressure from density and temperature, using ideal gas assumptions.
+
+    Args:
+        rho_kgpm3: The density, in kilograms per metre cubed.
+        temp_k: The temperature, in Kelvin.
+
+    Returns:
+        Gas pressure, in Pascal.
+
+    """
     return R_JPKGPK * rho_kgpm3 * temp_k
 
+
 def geom2geop45m(altitude_m):
-    """Converts geometric height to geopotential (m) assuming 45deg lat"""
+    """
+    Converts geometric height to geopotential (m) assuming 45deg latitude.
+
+    Args:
+        altitude_m: The geometric altitude above mean sea level.
+
+    Returns:
+        The geopotential altitude above mean sea level.
+
+    """
     return R_EARTH_M * altitude_m / (R_EARTH_M + altitude_m)
 
+
 def geop2geom45m(altitude_m):
-    """Converts geopotential height to geometric (m) assuming 45deg lat"""
+    """
+    Converts geopotential height to geometric (m) assuming 45deg latitude.
+
+    Args:
+        altitude_m: The geopotential altitude above mean sea level.
+
+    Returns:
+        The geometric altitude above mean sea level.
+
+    """
     return R_EARTH_M * altitude_m / (R_EARTH_M - altitude_m)
 
+
 class Runway:
-    """Runway model to be used for take-off/landing performance calculations.
+    """
+    Runway model to be used for take-off/landing performance calculations.
 
-    **Parameters** (all optional):
+    Examples:
 
-        icao_code
-            String. International Civil Aviation Organisation code of the airport. Required
-            if the user wishes to equip this object with the attributes of a specific,
-            existing runway, e.g., 'EGLL' (London Heathrow airport). Runway
-            data is obtained from an off-line image of the `ourairports.com` database.
+        Creating and querying a Runway object:
 
-        rwyno
-            Integer. Specifies which of the runways at the airport specified by the
-            ICAO code above we want to associate with the runway object. A `ValueError`
-            will be thrown if `rwyno` exceeds the number of runways at the airport
-            specified by the `icao_code`. The number of runways can be found in
-            the `nrways` attribute of the runway object: ::
+        >>> from ADRpy import atmospheres as at
+        >>> runway = at.Runway('EGLL', 0)
 
-                runway = at.Runway('KDEN')
-                runway.nrways
+        >>> print(f"Runway: {runway.le_ident} / {runway.he_ident}\\n"
+        ...       f"True headings: {runway.le_heading_degt} / "
+        ...       f"{runway.he_heading_degt} degrees\\n"
+        ...       f"Elevation (low end): {runway.le_elevation_ft} ft\\n"
+        ...       f"Length: {runway.length_ft} ft")
+        Runway: 09L / 27R
+        True headings: 89.6 / 269.6 degrees
+        Elevation (low end): 79.0 ft
+        Length: 12799.0 ft
 
-            Output: ::
-
-                6
-
-        elevation_ft, heading, surf, length_ft, width_ft
-            Parameters of bespoke, user-defined runways. The recommended use of these
-            is as indicated by their names, though the user may wish to adopt their
-            own definitions to suit particular applications (for example, `surf` can
-            be any string describing the runway surface).
-
-    **Example - creating and querying a Runway class object:** ::
-
-        from ADRpy import atmospheres as at
-
-        runway = at.Runway('EGLL', 0)
-
-        print('Runway: ', runway.le_ident, '/', runway.he_ident)
-
-        print('True headings: ',
-            runway.le_heading_degt, '/',
-            runway.he_heading_degt, 'degrees')
-
-        print('Elevation (low end): ', runway.le_elevation_ft, 'ft')
-
-        print('Length: ', runway.length_ft, 'ft')
-
-    Outputs: ::
-
-        Runway:  09L / 27R
-        True headings:  89.6 / 269.6 degrees
-        Elevation (low end):  79.0 ft
-        Length:  12799.0 ft
     """
 
-    def __init__(self, icao_code=None, rwyno=0,
+    def __init__(self, icao_code: str = None, rwyno: int = 0,
                  elevation_ft=0, heading=0, surf='ASP',
                  length_ft=10000, width_ft=100):
+        """
+        Args:
+            icao_code: International Civil Aviation Organisation code of the
+                airport. Required if the user wishes to equip this object with
+                the attributes of a specific, existing runway, e.g., 'EGLL'
+                (London Heathrow airport). Runway data is obtained from an
+                off-line image of the `ourairports.com` database.
+            rwyno: If an icao_code is provided, use to select a runway.
+            elevation_ft: For custom runways (icao_code=None), prescribe runway
+                elevation. Optional, defaults to 0.
+            heading: For custom runways (icao_code=None), prescribe runway
+                heading. Optional, defaults to 0 (due North).
+            surf: For custom runways (icao_code=None), prescribe the runway
+                surface type. Optional, defaults to "ASP" (asphalt).
+            length_ft: For custom runways (icao_code=None), prescribe the runway
+                length in feet. Optional, defaults to 10,000.
+            width_ft: For custom runways (icao_code=None), prescribe the runway
+                width in feet. Optional, defaults to 100.
+
+        Raises:
+            ValueError: Thrown if 'rwyno' parameter exceeds the number of
+                runways at the airport specified by the `icao_code`. The number
+                of runways can be found in the `nrways` attribute of the runway
+                object:
+
+                >>> runway = Runway('KDEN')
+                >>> runway.nrways
+                6
+
+        """
         if icao_code:
             # Read relevant runway data from the ourairports.com database
             # le_... / he_... - numbers referring to the low/high end respectively
-            rwy_file = os.path.join(os.path.dirname(__file__), "data", "runways.csv")
+            rwy_file = os.path.join(os.path.dirname(__file__), "data",
+                                    "runways.csv")
             with open(rwy_file, newline='') as rwyfile:
                 runwaydata = csv.reader(rwyfile, delimiter=',')
                 runwaylist = []
                 for row in runwaydata:
                     runwaylist.append(row)
-            rindlst = [i for i, rwy in enumerate(runwaylist) if rwy[2] == icao_code]
+            rindlst = [i for i, rwy in enumerate(runwaylist) if
+                       rwy[2] == icao_code]
             self.nrways = len(rindlst)
             if rwyno > self.nrways - 1:
                 print('Requested rwy. nr. exceeds the nr. of runways at ',
@@ -160,7 +172,8 @@ class Runway:
             self.le_elevation_ft = float(runwaylist[rind + rwyno][11])
             self.le_heading_degt = float(runwaylist[rind + rwyno][12])
             try:
-                self.le_displaced_threshold_ft = float(runwaylist[rind + rwyno][13])
+                self.le_displaced_threshold_ft = float(
+                    runwaylist[rind + rwyno][13])
             except ValueError:
                 self.le_displaced_threshold_ft = float('nan')
             self.he_ident = runwaylist[rind + rwyno][14]
@@ -169,7 +182,8 @@ class Runway:
             self.he_elevation_ft = float(runwaylist[rind + rwyno][17])
             self.he_heading_degt = float(runwaylist[rind + rwyno][18])
             try:
-                self.he_displaced_threshold_ft = float(runwaylist[rind + rwyno][19])
+                self.he_displaced_threshold_ft = float(
+                    runwaylist[rind + rwyno][19])
             except ValueError:
                 self.he_displaced_threshold_ft = float('nan')
         else:
@@ -182,13 +196,13 @@ class Runway:
             self.surface = surf
             self.lighted = 1
             self.closed = 0
-            self.le_ident = str(int(heading/10))
+            self.le_ident = str(int(heading / 10))
             self.le_latitude_deg = 0
             self.le_longitude_deg = 0
             self.le_elevation_ft = elevation_ft
             self.le_heading_degt = heading
             self.le_displaced_threshold_ft = 0
-            self.he_ident = str(int(reciprocalhdg(heading)/10))
+            self.he_ident = str(int(reciprocalhdg(heading) / 10))
             self.he_latitude_deg = 0
             self.he_longitude_deg = 0
             self.he_elevation_ft = elevation_ft
@@ -199,58 +213,52 @@ class Runway:
         self.length_m = co.feet2m(self.length_ft)
         self.width_m = co.feet2m(self.width_ft)
         self.le_elevation_m = co.feet2m(self.le_elevation_ft)
-        self.le_displaced_threshold_m = co.feet2m(self.le_displaced_threshold_ft)
+        self.le_displaced_threshold_m = co.feet2m(
+            self.le_displaced_threshold_ft)
         self.he_elevation_m = co.feet2m(self.he_elevation_ft)
-        self.he_displaced_threshold_m = co.feet2m(self.he_displaced_threshold_ft)
+        self.he_displaced_threshold_m = co.feet2m(
+            self.he_displaced_threshold_ft)
 
-
-    def windcomponents(self, wind_dirs_deg, wind_speeds):
-        """Resolves list of wind speeds and directions into runway/cross components
+    def windcomponents(self, wind_dirs_deg: list[float],
+                       wind_speeds: list[float]):
+        """
+        Resolves list of wind speeds and directions into runway/cross components
         on the current runway.
 
-        **Parameters:**
+        Args:
+            wind_dirs_deg: Wind directions expressed in degrees true
+                (e.g. directions specified in a METAR).
+            wind_speeds: Wind_speeds (in the units in which the output is
+                desired).
 
-        wind_dirs_deg
-            List of floats. Wind directions expressed in degrees true (e.g., directions
-            specified in a METAR).
-
-        wind_speeds
-            List of floats. Wind_speeds (in the units in which the output is desired).
-
-        **Outputs:**
-
-        runway_component
-            Scalar or numpy array. The runway direction component of the wind (sign
-            convention: headwinds are positive).
-
-        crosswind_component
-            Scalar or numpy array. The cross component of the wind (sign convention:
-            winds from the right are positive).
+        Returns:
+            A tuple (runway_component, crosswind_component) where each item is
+            a scalar or numpy array. These correspond with the runway direction
+            component of the wind (sign convention: headwinds are positive),
+            and the cross component of the wind (sign convention: winds from the
+            right are positive).
 
 
-        **Example** ::
+        Examples:
 
-            # Given a METAR, calculate the wind components on Rwy 09 at Yeovilton
+            Given a METAR, calculate the wind components on Rwy 09 at Yeovilton
 
-            from ADRpy import atmospheres as at
-            from metar import Metar
+            >>> from ADRpy import atmospheres as at
+            >>> from metar import Metar
 
-            runway = at.Runway('EGDY', 1)
+            >>> runway = at.Runway('EGDY', 1)
+            >>> egdywx = Metar.Metar('EGDY 211350Z 30017G25KT 9999 FEW028 BKN038 08/01 Q1031')
 
-            egdywx = Metar.Metar('EGDY 211350Z 30017G25KT 9999 FEW028 BKN038 08/01 Q1031')
+            >>> direction_deg = egdywx.wind_dir.value()
+            >>> windspeed_kts = egdywx.wind_speed.value()
 
-            direction_deg = egdywx.wind_dir.value()
-            windspeed_kts = egdywx.wind_speed.value()
+            >>> rwy_knots, cross_knots = runway.windcomponents(direction_deg, windspeed_kts)
 
-            rwy_knots, cross_knots = runway.windcomponents(direction_deg, windspeed_kts)
+            >>> print(f"Runway component: {rwy_knots}\\n"
+            ...       f"Cross component: {cross_knots}")
+            Runway component: -13.594639194280536
+            Cross component: -10.207143830540032
 
-            print("Runway component:", rwy_knots)
-            print("Cross component:", cross_knots)
-
-        Output: ::
-
-            Runway component: -13.5946391943
-            Cross component: -10.2071438305
         """
 
         speeds = mtools.recastasnpfloatarray(wind_speeds)
@@ -262,8 +270,8 @@ class Runway:
 
         relative_heading_rad = np.deg2rad(directions_deg - self.le_heading_degt)
 
-        runway_component = speeds * np.cos(relative_heading_rad) # Headwind: +
-        crosswind_component = speeds * np.sin(relative_heading_rad) # Right: +
+        runway_component = speeds * np.cos(relative_heading_rad)  # Headwind: +
+        crosswind_component = speeds * np.sin(relative_heading_rad)  # Right: +
 
         # Scalar output to a scalar input
         if isinstance(wind_dirs_deg, Number):
@@ -272,12 +280,29 @@ class Runway:
         return runway_component, crosswind_component
 
 
-
 class Obsprofile:
-    """Observed atmosphere profile data."""
+    """
+    Observed atmosphere profile data.
 
-    def __init__(self, alt_m=None, temp_k=None, rho_kgpm3=None, p_pa=None):
+    Instances of Obsprofile can be passed as the 'profile' argument of
+    the Atmosphere class.
+    """
 
+    def __init__(self, alt_m, temp_k=None, rho_kgpm3=None, p_pa=None):
+        """
+        Args:
+            alt_m: Altitudes at which observations were made.
+            temp_k: Observed temperatures, in Kelvin. Optional.
+            rho_kgpm3: Observed densities, in kilograms per metre cubed.
+                Optional.
+            p_pa: Observed pressures, in Pascal. Optional.
+
+        Notes:
+             If either of pressure or density arrays are missing from the
+             arguments, the missing array of data can be calculated from
+             ideal gas laws.
+
+        """
         self.alt_m = np.array(alt_m)
 
         self.temp_k = np.array(temp_k)
@@ -287,14 +312,14 @@ class Obsprofile:
         # Check and complete the data table and build the interp functions
 
         # temperature (K) and density are given against an altitude scale
-        if np.size(self.alt_m) == np.size(self.temp_k) == np.size(self.rho_kgpm3):
+        if np.size(self.alt_m) == np.size(self.temp_k) == np.size(
+                self.rho_kgpm3):
             self.p_pa = R_JPKGPK * self.rho_kgpm3 * self.temp_k
         # temperature (K) and pressure are given against an altitude scale
         elif np.size(self.alt_m) == np.size(self.temp_k) == np.size(self.p_pa):
             self.rho_kgpm3 = idealgasdens_kgm3(self.p_pa, self.temp_k)
         # speed of sound
-        self.vs_mps = \
-        [math.sqrt(1.4 * R_JPKGPK * T) for T in self.temp_k]
+        self.vs_mps = np.sqrt(1.4 * R_JPKGPK * self.temp_k)
 
         # all data points ready, the interpolators can now be constructed
         self.ftemp_k = interpolate.interp1d(self.alt_m, self.temp_k)
@@ -302,68 +327,63 @@ class Obsprofile:
         self.frho_kgpm3 = interpolate.interp1d(self.alt_m, self.rho_kgpm3)
         self.fvs_mps = interpolate.interp1d(self.alt_m, self.vs_mps)
 
+    @property
     def loalt(self):
         """The minimum valid altitude (in m) of the interpolators."""
         return min(self.alt_m)
 
+    @property
     def hialt(self):
         """The maximum valid altitude (in m) of the interpolators."""
         return max(self.alt_m)
 
 
 class Atmosphere:
-    """Standard or off-standard/custom atmospheres.
+    """
+    Standard or off-standard/custom atmospheres.
 
-    **Available atmosphere types**
+    Available atmosphere (profile) types include:
 
-    1. The International Standard Atmosphere (**ISA**) model. Based on ESDU
-    Data Item 77022, `"Equations for calculation of International
-    Standard Atmosphere and associated off-standard atmospheres"`,
-    published in 1977, amended in 2008. It covers the first  50km of
-    the atmosphere.
+    -   The International Standard Atmosphere (**ISA**) model. Based on ESDU
+        Data Item 77022, `"Equations for calculation of International
+        Standard Atmosphere and associated off-standard atmospheres"`,
+        published in 1977, amended in 2008. It covers the first  50km of
+        the atmosphere.
+    -   Off-standard, temperature offset versions of the above.
+    -   Extremely warm/cold, and low/high density atmospheres from US
+        MIL HDBK 310
+    -   User-defined atmospheres based on interpolated data.
 
-    2. Off-standard, temperature offset versions of the above.
+    Examples:
 
-    3. Extremely warm/cold, and low/high density atmospheres from US
-    MIL HDBK 310
+        >>> from ADRpy import atmospheres as at
+        >>> from ADRpy import unitconversions as co
 
-    4. User-defined atmospheres based on interpolated data.
+        Instantiate an atmosphere object: an off-standard ISA with a -10C offset
 
-    **Example** ::
+        >>> isa_minus10 = at.Atmosphere(offset_deg=-10)
 
-        from ADRpy import atmospheres as at
-        from ADRpy import unitconversions as co
+        >>> # Query altitude
+        >>> altitude_ft = 38000
+        >>> altitude_m = co.feet2m(altitude_ft)
 
-        # Instantiate an atmosphere object: an off-standard ISA
-        # with a -10C offset
-        isa_minus10 = at.Atmosphere(offset_deg=-10)
+        >>> # Query the ambient density in this model at the specified altitude
+        ... print(f"ISA-10C density at {str(altitude_ft)} feet (geopotential):",
+        ...       isa_minus10.airdens_kgpm3(altitude_m), "kg/m^3")
+        ISA-10C density at 38000 feet (geopotential): 0.3480494789991107 kg/m^3
 
-        # Query altitude
-        altitude_ft = 38000
-        altitude_m = co.feet2m(altitude_ft)
 
-        # Query the ambient density in this model at the specified altitude
-        print("ISA-10C density at", str(altitude_ft), "feet (geopotential):",
-            isa_minus10.airdens_kgpm3(altitude_m), "kg/m^3")
-
-        # Query the speed of sound in this model at the specified altitude
-        print("ISA-10C speed of sound at", str(altitude_ft), "feet (geopotential):",
-            isa_minus10.vsound_mps(altitude_m), "m/s")
-
-    Output: ::
-
-        ISA-10C density at 38000 feet (geopotential): 0.348049478999 kg/m^3
+        >>> # Query the speed of sound in this model at the specified altitude
+        ... print(f"ISA-10C speed of sound at {str(altitude_ft)} feet",
+        ... "(geopotential):", isa_minus10.vsound_mps(altitude_m), "m/s")
         ISA-10C speed of sound at 38000 feet (geopotential): 288.1792251702055 m/s
 
-    **Note**
-
-    The unit tests (found in tests/t_atmospheres.py in the GitHub
-    repository) compare the atmosphere outputs against data from the 1976 US
-    Standard Atmosphere, NASA-TM-X-74335. ESDU 77022 describes its
-    ISA model as being identical for all practical purposes with the US
-    Standard Atmospheres.
-
-    **Methods**
+    Notes:
+        The unit tests (found in tests/t_atmospheres.py in the GitHub
+        repository) compare the atmosphere outputs against data from the 1976 US
+        Standard Atmosphere, NASA-TM-X-74335. ESDU 77022 describes its
+        ISA model as being identical for all practical purposes with the US
+        Standard Atmospheres.
 
     """
 
@@ -428,52 +448,55 @@ class Atmosphere:
     _G5 = -0.12622656e-3
     _M5 = 0.53839563
     _N5 = -0.12622656e-3
-    #==========================================================================
 
+    # ==========================================================================
 
+    def __init__(self, offset_deg=0, profile: Obsprofile = None):
 
-    def __init__(self, offset_deg=0, profile=None):
-
-        self.offset_deg = offset_deg # Relative temperature (C or K)
+        self.offset_deg = offset_deg  # Relative temperature (C or K)
         self.profile = profile
 
         # If an altitude vector is not specified...
-        if not profile is None:
-            self.is_isa = False # Interpolated atmosphere
+        if profile is not None:
+            self.is_isa = False  # Interpolated atmosphere
         else:
-            #...then we are building an ISA
+            # ...then we are building an ISA
             self.is_isa = True
-
-
 
     def _alttest(self, reqalt_m):
 
         if isinstance(reqalt_m, Number):
             reqalt_m = [reqalt_m]
-        # Convert to Numpy array if list
-        reqalt_m = np.array(reqalt_m)
-        # Recast as float, as there is no sensible reason for integers
-        reqalt_m = [x.astype(float) for x in reqalt_m]
+        # Recast as numpy floats, as there is no sensible reason for integers
+        reqalt_m = np.array(reqalt_m, dtype=float)
 
         if self.is_isa:
-            if any(x > self._Level5 for x in reqalt_m):
+            if (reqalt_m > self._Level5).any():
                 print('Altitudes had to be limited to 50km where higher.')
                 reqalt_m[reqalt_m > self._Level5] = self._Level5
         else:
             minalt_m = np.amin(self.profile.alt_m)
             maxalt_m = np.amax(self.profile.alt_m)
-            if any(reqalt_m < minalt_m):
+            if np.asarray(reqalt_m < minalt_m).any():
                 print('Requested altitude below interpolation range.')
                 reqalt_m[reqalt_m < minalt_m] = minalt_m
-            if any(reqalt_m > maxalt_m):
+            if np.asarray(reqalt_m > maxalt_m).any():
                 print('Requested altitude above interpolation range.')
                 reqalt_m[reqalt_m > maxalt_m] = maxalt_m
 
         return reqalt_m
 
-
     def _isatemp_k(self, altitude_m):
-        """ISA temperature as a function of geopotential altitude"""
+        """
+        ISA temperature as a function of geopotential altitude.
+
+        Args:
+            altitude_m: Geopotential altitude above mean sea level.
+
+        Returns:
+            The ISA temperature, in Kelvin.
+
+        """
         alt_it = np.nditer([altitude_m, None])
         for alt, t_k in alt_it:
             if alt < self._Level1:
@@ -495,9 +518,17 @@ class Atmosphere:
             t_k[...] = t_k[...] + self.offset_deg
         return alt_it.operands[1]
 
-
     def _isapress_pa(self, altitude_m):
-        """ISA pressure as a function of geopotential altitude"""
+        """
+        ISA pressure as a function of geopotential altitude.
+
+        Args:
+            altitude_m: Geopotential altitude above mean sea level.
+
+        Returns:
+            The ISA pressure, in Pascal.
+
+        """
         alt_it = np.nditer([altitude_m, None])
         for alt, pressure_pa in alt_it:
             if alt < self._Level1:
@@ -505,7 +536,7 @@ class Atmosphere:
                 pressure_pa[...] = (self._C1 + self._D1 * alt) ** self._E1
             elif alt < self._Level2:
                 # Lower stratopshere
-                pressure_pa[...] = self._F2 * math.exp(self._G2 * alt)
+                pressure_pa[...] = self._F2 * np.exp(self._G2 * alt)
             elif alt < self._Level3:
                 # Upper stratopshere
                 pressure_pa[...] = (self._C3 + self._D3 * alt) ** self._E3
@@ -514,12 +545,21 @@ class Atmosphere:
                 pressure_pa[...] = (self._C4 + self._D4 * alt) ** self._E4
             else:
                 # Between 47km and 51km
-                pressure_pa[...] = self._F5 * math.exp(self._G5 * alt)
+                pressure_pa[...] = self._F5 * np.exp(self._G5 * alt)
         return alt_it.operands[1]
 
-
     def _isapressalt_m(self, pressure_pa):
-        """Returns the geopotential alt (m) at which ISA has the given pressure"""
+        """
+        Returns the geopotential altitude at which the ISA has the given
+        pressure.
+
+        Args:
+            pressure_pa: Pressure in Pascal.
+
+        Returns:
+            The corresponding (geopotential) altitude above mean sea level.
+
+        """
         press_it = np.nditer([pressure_pa, None])
         for press_pa, alt_m in press_it:
             if press_pa > self._pLevel1:
@@ -527,7 +567,8 @@ class Atmosphere:
                 alt_m[...] = (press_pa ** (1 / self._E1) - self._C1) / self._D1
             elif press_pa > self._pLevel2:
                 # Lower stratopshere
-                alt_m[...] = (1 / self._G2) * math.log1p(press_pa / self._F2 - 1)
+                alt_m[...] = (1 / self._G2) * np.log1p(
+                    press_pa / self._F2 - 1)
             elif press_pa > self._pLevel3:
                 # Upper stratopshere
                 alt_m[...] = (press_pa ** (1 / self._E3) - self._C3) / self._D3
@@ -536,12 +577,21 @@ class Atmosphere:
                 alt_m[...] = (press_pa ** (1 / self._E4) - self._C4) / self._D4
             else:
                 # Between 47km and 51km
-                alt_m[...] = (1 / self._G5) * math.log1p(press_pa / self._F5 - 1)
+                alt_m[...] = (1 / self._G5) * np.log1p(
+                    press_pa / self._F5 - 1)
         return press_it.operands[1]
 
-
     def _isadens_kgpm3(self, altitude_m):
-        """ISA density as a function of geopotential altitude"""
+        """
+        ISA density as a function of geopotential altitude.
+
+        Args:
+            altitude_m: Geopotential altitude above mean sea level.
+
+        Returns:
+            The ISA density, in kilograms per metre cubed.
+
+        """
         alt_it = np.nditer([altitude_m, None])
         for alt, dens_kgpm3 in alt_it:
             if alt < self._Level1:
@@ -549,7 +599,7 @@ class Atmosphere:
                 dens_kgpm3[...] = (self._I1 + self._J1 * alt) ** self._L1
             elif alt < self._Level2:
                 # Lower stratopshere
-                dens_kgpm3[...] = self._M2 * math.exp(self._N2 * alt)
+                dens_kgpm3[...] = self._M2 * np.exp(self._N2 * alt)
             elif alt < self._Level3:
                 # Upper stratopshere
                 dens_kgpm3[...] = (self._I3 + self._J3 * alt) ** self._L3
@@ -558,16 +608,26 @@ class Atmosphere:
                 dens_kgpm3[...] = (self._I4 + self._J4 * alt) ** self._L4
             else:
                 # Between 47km and 51km
-                dens_kgpm3[...] = self._M5 * math.exp(self._N5 * alt)
+                dens_kgpm3[...] = self._M5 * np.exp(self._N5 * alt)
             # Adjust for the temperature offset
             dens_kgpm3[...] = \
-            dens_kgpm3[...] / (1 + self.offset_deg / (self._isatemp_k(alt) - self.offset_deg))
+                dens_kgpm3[...] / (1 + self.offset_deg / (
+                        self._isatemp_k(alt) - self.offset_deg))
 
         return alt_it.operands[1]
 
-
     def _isadensalt_m(self, dens_kgpm3):
-        """Returns the geopotential alt (m) at which ISA has given density (kg/m^3)"""
+        """
+        Returns the geopotential altitude at which the ISA has given density
+        (kg/m^3).
+
+        Args:
+            dens_kgpm3: Air density in kilograms per metre cubed.
+
+        Returns:
+            The corresponding (geopotential) altitude above mean sea level.
+
+        """
         dense_it = np.nditer([dens_kgpm3, None])
         for d_kgpm3, alt_m in dense_it:
             if d_kgpm3 > self._dLevel1:
@@ -575,7 +635,8 @@ class Atmosphere:
                 alt_m[...] = (d_kgpm3 ** (1 / self._L1) - self._I1) / self._J1
             elif d_kgpm3 > self._dLevel2:
                 # Lower stratopshere
-                alt_m[...] = (1 / self._N2) * math.log1p(dens_kgpm3 / self._M2 - 1)
+                alt_m[...] = (1 / self._N2) * np.log1p(
+                    dens_kgpm3 / self._M2 - 1)
             elif d_kgpm3 > self._dLevel3:
                 # Upper stratopshere
                 alt_m[...] = (d_kgpm3 ** (1 / self._L3) - self._I3) / self._J3
@@ -584,82 +645,114 @@ class Atmosphere:
                 alt_m[...] = (d_kgpm3 ** (1 / self._L4) - self._I4) / self._J4
             else:
                 # Between 47km and 51km
-                alt_m[...] = (1 / self._N5) * math.log1p(d_kgpm3 / self._M5 - 1)
+                alt_m[...] = (1 / self._N5) * np.log1p(d_kgpm3 / self._M5 - 1)
             # Adjust for the temperature offset
         return dense_it.operands[1]
 
+    def airtemp_k(self, altitude_m=0):
+        """
+        Compute temperatures in the selected atmosphere, in Kelvin.
 
-    def airtemp_k(self, altitudes_m=0):
-        """Temperatures in the selected atmosphere, in K.
+        Args:
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
 
-        **Parameter:**
+        Returns:
+            Ambient (static air) temperature, in Kelvin.
 
-        altitudes_m
-            altitudes at which the temperature is to be interrogated (float
-            or array of floats)
+        Examples:
 
-        **Output:**
+            >>> isa = Atmosphere()
 
-        Ambient temperature (Static Air Temperature) in Kelvin.
-
-        **Example** ::
-
-            from ADRpy import atmospheres as at
-
-            isa = at.Atmosphere()
-
-            print("ISA temperatures at SL, 5km, 10km (geopotential):",
-                isa.airtemp_k([0, 5000, 10000]), "K")
-
-        Output: ::
-
-            ISA temperatures at SL, 5km, 10km (geopotential): [ 288.15  255.65  223.15] K
+            >>> print(f"ISA temperatures at SL, 5km, 10km (geopotential):",
+            ...       f"{isa.airtemp_k([0, 5e3, 10e3])} K")
+            ISA temperatures at SL, 5km, 10km (geopotential): [288.15 255.65 223.15] K
 
         """
-
-        altitudes_m = self._alttest(altitudes_m)
+        altitude_m = self._alttest(altitude_m)
         if self.is_isa:
-            temperatures_k = self._isatemp_k(altitudes_m)
+            temperatures_k = self._isatemp_k(altitude_m)
         else:
-            temperatures_k = self.profile.ftemp_k(altitudes_m)
+            temperatures_k = self.profile.ftemp_k(altitude_m)
         return _reverttoscalar(temperatures_k)
 
+    def airpress_pa(self, altitude_m=0):
+        """
+        Compute pressures in the selected atmosphere, in Pascal.
 
-    def airpress_pa(self, altitudes_m=0):
-        """Pressures in the selected atmosphere, in Pa."""
-        altitudes_m = self._alttest(altitudes_m)
+        Args:
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            Ambient (static air) pressure, in Pascal.
+
+        """
+        altitude_m = self._alttest(altitude_m)
         if self.is_isa:
-            pressures_pa = self._isapress_pa(altitudes_m)
+            pressures_pa = self._isapress_pa(altitude_m)
         else:
-            pressures_pa = self.profile.fp_pa(altitudes_m)
+            pressures_pa = self.profile.fp_pa(altitude_m)
         return _reverttoscalar(pressures_pa)
 
+    def vsound_mps(self, altitude_m=0):
+        """
+        Speed of sound in m/s at an altitude given in m.
 
-    def vsound_mps(self, altitudes_m=0):
-        """Speed of sound in m/s at an altitude given in m."""
-        altitudes_m = self._alttest(altitudes_m)
-        temperatures_k = self.airtemp_k(altitudes_m)
+        Args:
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            Speed of sound at altitude, in metres per second.
+
+        """
+        altitude_m = self._alttest(altitude_m)
+        temperatures_k = self.airtemp_k(altitude_m)
         vsounds_mps = _vsound_mps(temperatures_k)
         return _reverttoscalar(vsounds_mps)
 
+    def airdens_kgpm3(self, altitude_m=0):
+        """
+        Ambient density in the current atmosphere in kilograms per metre cubed.
 
-    def airdens_kgpm3(self, altitudes_m=0):
-        """Ambient density in the current atmosphere in :math:`\\mathrm{kg/m}^3`."""
-        altitudes_m = self._alttest(altitudes_m)
+        Args:
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            Ambient air density, in kilograms per metre cubed.
+
+        """
+        altitude_m = self._alttest(altitude_m)
         if self.is_isa:
-            densities_kgpm3 = self._isadens_kgpm3(altitudes_m)
+            densities_kgpm3 = self._isadens_kgpm3(altitude_m)
         else:
-            densities_kgpm3 = self.profile.frho_kgpm3(altitudes_m)
+            densities_kgpm3 = self.profile.frho_kgpm3(altitude_m)
         return _reverttoscalar(densities_kgpm3)
 
-
     def mach(self, airspeed_mps, altitude_m=0):
-        """Mach number at a given speed (m/s) and altitude (m)"""
+        """
+        Mach number at a given speed (m/s) and altitude (m).
+
+        Args:
+            airspeed_mps: The freestream speed of the air, in metres per second.
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            Mach number at altitude.
+
+        """
 
         airspeed_mps = mtools.recastasnpfloatarray(airspeed_mps)
-        # Airspeed may be negative, e.g., when simulating a tailwind, but Mach must be >0
+        # Airspeed may be negative, e.g., when simulating a tailwind, but Mach
+        # must be >0
         if airspeed_mps.any() < 0:
-            negmsg = "Airspeed < 0. If intentional, ignore this. Positive Mach no. returned."
+            negmsg = (
+                "Airspeed < 0. If intentional, ignore this. Positive Mach no."
+                " returned."
+            )
             warnings.warn(negmsg, RuntimeWarning)
             airspeed_mps = abs(airspeed_mps)
 
@@ -671,163 +764,167 @@ class Atmosphere:
 
         return airspeed_mps / vs_mps
 
+    def vsound_kts(self, altitude_m=0):
+        """
+        Compute the local speed of sound in knots.
 
-    def vsound_kts(self, altitudes_m=0):
-        """Speed of sound in knots."""
-        return co.mps2kts(self.vsound_mps(altitudes_m))
+        Args:
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
 
-
-    def airpress_mbar(self, altitudes_m=0):
-        """Air pressure in mbar."""
-        return co.pa2mbar(self.airpress_pa(altitudes_m))
-
-
-    def airtemp_c(self, altitudes_m=0):
-        """Air temperature in Celsius."""
-        return co.k2c(self.airtemp_k(altitudes_m))
-
-
-    def dynamicpressure_pa(self, airspeed_mps=0, altitudes_m=0):
-        """Dynamic pressure in the current atmosphere at a given true airspeed and altitude
-
-        **Parameters**
-
-        airspeed_mps
-            float, true airspeed in m/s (MPSTAS)
-
-        altitudes_m
-            float array, altitudes in m where the dynamic pressure is to be computed
-
-        **Returns**
-
-        float or array of floats, dynamic pressure values
-
-        **Example** ::
-
-            from ADRpy import atmospheres as at
-            from ADRpy import unitconversions as co
-
-            ISA = at.Atmosphere()
-
-            altitudelist_m = [0, 500, 1000, 1500]
-
-            MPSTAS = 20
-
-            q_Pa = ISA.dynamicpressure_pa(MPSTAS, altitudelist_m)
-
-            q_mbar = co.pa2mbar(q_Pa)
-
-            print(q_mbar)
-
-        Output: ::
-
-            [ 2.44999974  2.33453737  2.22328473  2.11613426]
+        Returns:
+            The local speed of sound, in knots.
 
         """
+        return co.mps2kts(self.vsound_mps(altitude_m))
 
-        return 0.5 * self.airdens_kgpm3(altitudes_m) * (airspeed_mps ** 2)
+    def airpress_mbar(self, altitude_m=0):
+        """
+        Compute the local air pressure in millibar.
 
+        Args:
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            The ambient air pressure, in millibar.
+
+        """
+        return co.pa2mbar(self.airpress_pa(altitude_m))
+
+    def airtemp_c(self, altitude_m=0):
+        """
+        Compute the local air temperature in Celsius.
+        Args:
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            The ambient air temperature, in degrees Celsius.
+
+        """
+        return co.k2c(self.airtemp_k(altitude_m))
+
+    def dynamicpressure_pa(self, airspeed_mps=0, altitude_m=0):
+        """
+        Compute the dynamic pressure in the current atmosphere at a given true
+        airspeed and altitude.
+
+        Args:
+            airspeed_mps: The freestream speed of the air, in metres per second.
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            Dynamic pressure values, in Pascal.
+
+        Examples:
+
+            >>> isa = Atmosphere()
+
+            >>> # True airspeed in metres per second
+            >>> MPSTAS = 20
+            >>> altitudelist_m = [0, 500, 1000, 1500]
+
+            >>> q_Pa = isa.dynamicpressure_pa(MPSTAS, altitudelist_m)
+            >>> q_mbar = co.pa2mbar(q_Pa)
+            >>> print(q_mbar)
+            [2.44999974 2.33453737 2.22328473 2.11613426]
+
+        """
+        return 0.5 * self.airdens_kgpm3(altitude_m) * (airspeed_mps ** 2)
 
     def eas2tas(self, eas, altitude_m):
-        """Converts EAS to TAS at a given altitude.
+        """
+        Converts EAS to TAS at a given altitude.
 
-        The method first calculates the density ratio :math:`\\sigma`
-        (as the ratio of the ambient density at *altitude_m* and
-        at the ambient density at sea level); the true airspeed is then calculated
-        as:
+        The method first calculates the density ratio (the ratio of ambient
+        density at altitude to the ambient density at sea level). Since
+        equivalent airspeed is the airspeed at sea-level which produces the same
+        dynamic pressure that true airspeed does at altitude, we simply correct
+        EAS by the density ratio.
 
-        .. math::
+        Args:
+            eas: The equivalent airspeed.
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
 
-            \\mathrm{TAS}=\\frac{\\mathrm{EAS}}{\\sqrt{\\sigma}}
+        Returns:
+            True airspeed in the same unit as the input.
 
-        **Parameters**
-
-        eas
-            Float or numpy array of floats. Equivalent airspeed (any unit,
-            returned TAS value will be in the same unit).
-
-        altitude_m
-            Float. Flight altitude in metres.
-
-        **Returns**
-
-        True airspeed in the same units as the EAS input.
         """
         dratio = self.airdens_kgpm3(altitude_m) / self.airdens_kgpm3(0)
-        return eas / math.sqrt(dratio)
+        return eas / np.sqrt(dratio)
 
     def tas2eas(self, tas, altitude_m):
-        """Convert TAS to EAS at a given altitude"""
+        """
+        Convert TAS to EAS at a given altitude.
+
+        Args:
+            tas: The true airspeed.
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            Equivalent airspeed in the same unit as the input.
+
+        """
         dratio = self.airdens_kgpm3(altitude_m) / self.airdens_kgpm3(0)
-        return tas * math.sqrt(dratio)
+        return tas * np.sqrt(dratio)
 
     def mpseas2mpscas(self, mpseas, altitude_m):
-        """Convert EAS (m/s) to CAS (m/s) at a given altitude (m)"""
+        """
+        Convert EAS (m/s) to CAS (m/s) at a given altitude (m).
+
+        The relationship between the two depends on the Mach number M and the
+        ratio of ambient air pressure at the current altitude to that of sea
+        level. The relationship is approximated using:
+
+        delta = p_alt / p_sl
+        CAS ~ EAS * (1 + (1-delta)/8 * M^2 + 3 * (1-10delta+9delta^2)/640 * M^4)
+
+        Args:
+            mpseas: Equivalent airspeed, in metres per second.
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
+
+        Returns:
+            A tuple (calibrated airspeed, Mach number), where calibrated
+            airspeed is given in metres per second.
+
+        """
         # Note: unit specific, as the calculation requires Mach no.
         mpstas = self.eas2tas(mpseas, altitude_m)
         machno = self.mach(mpstas, altitude_m)
         delta = self.airpress_pa(altitude_m) / self.airpress_pa()
         m2_term = (1.0 / 8.0) * (1 - delta) * (machno ** 2)
-        m4_term = (3.0 / 640.0) * (1 - 10 * delta + 9 * (delta**2)) * (machno ** 4)
+        m4_term = (3.0 / 640.0) * (1 - 10 * delta + 9 * (delta ** 2)) * (
+                machno ** 4)
         return mpseas * (1 + m2_term + m4_term), machno
 
     def keas2kcas(self, keas, altitude_m):
-        """Converts equivalent airspeed into calibrated airspeed.
+        """
+        Converts equivalent airspeed into calibrated airspeed.
 
-        The relationship between the two depends on the Mach number :math:`M` and the
-        ratio :math:`\\delta` of the pressure at the current altitude
-        :math:`P_\\mathrm{alt}` and the sea level pressure :math:`P_\\mathrm{0}`.
-        We approximate this relationship with the expression:
+        Args:
+            keas: Equivalent airspeed, in knots.
+            altitude_m: Geopotential altitudes at which the temperature is to
+                be interrogated (float or array of floats).
 
-        .. math::
+        Returns:
+            A tuple (kcas, Machno), where kcas is the calibrated airspeed in
+            knots and Machno is the Mach number.
 
-            \\mathrm{CAS}\\approx\\mathrm{EAS}\\left[1 + \\frac{1}{8}(1-\\delta)M^2 +
-            \\frac{3}{640}\\left(1-10\\delta+9\\delta^2 \\right)M^4 \\right]
+        Examples:
 
-        **Parameters**
+            >>> isa = Atmosphere()
 
-        keas
-            float or numpy array, equivalent airspeed in knots.
+            >>> keas = np.array([100, 200, 300])
+            >>> altitude_m = co.feet2m(40_000)
 
-        altitude_m
-            float, altitude in metres.
-
-        **Returns**
-
-        kcas
-            float or numpy array, calibrated airspeed in knots.
-
-        mach
-            float, Mach number.
-
-        **See also** ``mpseas2mpscas``
-
-        **Notes**
-
-        The reverse conversion is slightly more complicated, as their relationship
-        depends on the Mach number. This, in turn, requires the computation of the
-        true airspeed and that can only be computed from EAS, not CAS. The unit-
-        specific nature of the function is also the result of the need for computing
-        the Mach number.
-
-        **Example** ::
-
-            import numpy as np
-            from ADRpy import atmospheres as at
-            from ADRpy import unitconversions as co
-
-            isa = at.Atmosphere()
-
-            keas = np.array([100, 200, 300])
-            altitude_m = co.feet2m(40000)
-
-            kcas, mach = isa.keas2kcas(keas, altitude_m)
-
-            print(kcas)
-
-        Output: ::
-
-            [ 101.25392563  209.93839073  333.01861569]
+            >>> kcas, mach = isa.keas2kcas(keas, altitude_m)
+            >>> print(kcas)
+            [101.25392563 209.93839073 333.01861569]
 
         """
         # Note: unit specific, as the calculation requires Mach no.
@@ -838,11 +935,22 @@ class Atmosphere:
         return kcas, machno
 
 
-def mil_hdbk_310(high_or_low, temp_or_dens, alt_km):
-    """Load an atmospheric data set from US Military Handbook 310"""
+def mil_hdbk_310(high_or_low: str, temp_or_dens: str, alt_km: int):
+    """
+    Load an atmospheric data set from US Military Handbook 310.
+
+    Args:
+        high_or_low: Either of the strings "high" or "low".
+        temp_or_dens: Either of the strings "temp" or "dens".
+        alt_km: The altitude at which the high/low temp/dens condition occurs.
+
+    Returns:
+        An ObsProfile object.
+
+    """
 
     m310name = high_or_low + '_' + temp_or_dens \
-    + '_at_' + str(alt_km) + 'km.m310'
+               + '_at_' + str(alt_km) + 'km.m310'
 
     _fstr = os.path.join(os.path.dirname(__file__), "data",
                          "_MHDBK310", m310name)
@@ -851,20 +959,21 @@ def mil_hdbk_310(high_or_low, temp_or_dens, alt_km):
     # in a dedicated _MHDBK310 folder
     if not os.path.isfile(_fstr):
         _fstr = high_or_low + '_' + temp_or_dens \
-        + '_at_' + str(alt_km) + 'km.m310'
+                + '_at_' + str(alt_km) + 'km.m310'
 
     try:
         if temp_or_dens == 'temp':
             alt_km, t_1pct_k, rho_1pct_kgpm3, t_10pct_k, rho_10pct_kgpm3 = \
-            np.loadtxt(_fstr, skiprows=0, unpack=True)
+                np.loadtxt(_fstr, skiprows=0, unpack=True)
         else:
             alt_km, rho_1pct_kgpm3, t_1pct_k, rho_10pct_kgpm3, t_10pct_k = \
-            np.loadtxt(_fstr, skiprows=0, unpack=True)
+                np.loadtxt(_fstr, skiprows=0, unpack=True)
 
-        atm1pct = Obsprofile(alt_m=co.km2m(alt_km), temp_k=t_1pct_k, \
-        rho_kgpm3=rho_1pct_kgpm3)
-        atm10pct = Obsprofile(alt_m=co.km2m(alt_km), temp_k=t_10pct_k, \
-        rho_kgpm3=rho_10pct_kgpm3)
+        atm1pct = Obsprofile(
+            alt_m=co.km2m(alt_km), temp_k=t_1pct_k, rho_kgpm3=rho_1pct_kgpm3)
+        atm10pct = Obsprofile(
+            alt_m=co.km2m(alt_km), temp_k=t_10pct_k, rho_kgpm3=rho_10pct_kgpm3)
+
         return atm1pct, atm10pct
 
     except FileNotFoundError:
@@ -874,15 +983,13 @@ def mil_hdbk_310(high_or_low, temp_or_dens, alt_km):
 
 def _reverttoscalar(scalarorvec):
     """ Return scalar response to scalar input. """
-    if not(isinstance(scalarorvec, Number)) and np.size(scalarorvec) == 1:
+    if not (isinstance(scalarorvec, Number)) and np.size(scalarorvec) == 1:
         return scalarorvec[0]
     return scalarorvec
 
 
 def _vsound_mps(temp_k):
-    if isinstance(temp_k, Number):
-        return math.sqrt(1.4 * R_JPKGPK * temp_k)
-    return _reverttoscalar([math.sqrt(1.4 * R_JPKGPK * x) for x in temp_k])
+    return _reverttoscalar(np.sqrt(1.4 * R_JPKGPK * temp_k))
 
 
 def reciprocalhdg(heading_deg):
@@ -896,7 +1003,8 @@ def tempratio(temp_c, mach):
     """Ratio of total temperature and the standard SL temperature"""
     temp_k = co.c2k(temp_c)
     sealevelstdtmp_k = co.c2k(15.0)
-    theta0 = (temp_k/sealevelstdtmp_k) * (1 + (mach ** 2) * (GAMMA_DRY_AIR - 1)/2)
+    theta0 = (temp_k / sealevelstdtmp_k) * (
+            1 + (mach ** 2) * (GAMMA_DRY_AIR - 1) / 2)
     return theta0
 
 
@@ -908,14 +1016,14 @@ def tatbysat(mach, recfac=1.0):
 def pressratio(pressure_pa, mach):
     """Ratio of total pressure and the standard SL pressure"""
     sealevelstdtpress_pa = 101325
-    exp = GAMMA_DRY_AIR/(GAMMA_DRY_AIR - 1)
-    delta0 = (pressure_pa/sealevelstdtpress_pa) * \
-    (1 + (mach ** 2) * (GAMMA_DRY_AIR - 1)/2) ** exp
+    exp = GAMMA_DRY_AIR / (GAMMA_DRY_AIR - 1)
+    delta0 = (pressure_pa / sealevelstdtpress_pa) * \
+             (1 + (mach ** 2) * (GAMMA_DRY_AIR - 1) / 2) ** exp
     return delta0
 
 
 def turbofanthrustfactor(temp_c, pressure_pa, mach, \
-throttleratio=1, ptype="highbpr"):
+                         throttleratio=1, ptype="highbpr"):
     """Multiply SL static thrust by this to get thrust at specified conditions"""
 
     # Model based on Mattingly, J. D., "Elements of Gas Turbine Propulsion",
@@ -925,12 +1033,14 @@ throttleratio=1, ptype="highbpr"):
     theta0 = tempratio(temp_c, mach)
     delta0 = pressratio(pressure_pa, mach)
 
-    if ptype == "highbpr": # high bypass ratio
+    if ptype == "highbpr":  # high bypass ratio
         if theta0 <= throttleratio:
             return delta0 * (1 - 0.49 * np.sqrt(mach))
-        return delta0 * (1 - 0.49 * np.sqrt(mach) - 3 * (theta0 - throttleratio)/(1.5 + mach))
+        return delta0 * (
+                1 - 0.49 * np.sqrt(mach) - 3 * (theta0 - throttleratio) / (
+                1.5 + mach))
 
-    if ptype == "lowbpr": # low bypass, afterburner on
+    if ptype == "lowbpr":  # low bypass, afterburner on
         if theta0 <= throttleratio:
             return delta0
         return delta0 * (1 - 3.5 * (theta0 - throttleratio) / theta0)
@@ -957,7 +1067,7 @@ def turbopropthrustfactor_matt(temp_c, pressure_pa, mach, throttleratio=1):
     if theta0 <= throttleratio:
         return delta0 * (1 - 0.96 * (mach - 0.1) ** 0.25)
     return delta0 * (1 - 0.96 * (mach - 0.1) ** 0.25 - \
-3 * (theta0 - throttleratio) / (8.13 * (mach - 0.1)))
+                     3 * (theta0 - throttleratio) / (8.13 * (mach - 0.1)))
 
 
 def turbopropthrustfactor(dens_ratio, mach):
@@ -968,36 +1078,41 @@ def turbopropthrustfactor(dens_ratio, mach):
     X_alt_ft = [0, 5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000]
     X_alt_ft = [40000, 35000, 30000, 25000, 20000, 15000, 10000, 5000, 0]
     X_alt_ft = X_alt_ft[::-1]
-    isa_sl_dens = 1.2249998682209657 #SSOT violation in the interest of speed
+    isa_sl_dens = 1.2249998682209657  # SSOT violation in the interest of speed
     X_dens_ratio = [0.24616951531253428, 0.3098749509963361, 0.3741322424507335,
                     0.44811893933199765, 0.5328112272029571, 0.6292375381232487,
                     0.7384790974933775, 0.8616704548972803, 1.0]
     Y_Mach = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 
     Z_thr_ratio = \
-    np.array([[0.24301874, 0.22386998, 0.17652686, 0.14221442, 0.11592392, 0.09937799, 0.06240678],
-              [0.3128897 , 0.30047179, 0.26491134, 0.21632642, 0.17804871, 0.1498797 , 0.12426883],
-              [0.38302311, 0.3725948 , 0.33679446, 0.27993518, 0.23118738, 0.20371041, 0.17623344],
-              [0.45869702, 0.44896454, 0.40851692, 0.33699743, 0.27831082, 0.24504059, 0.21177037],
-              [0.54553835, 0.53270352, 0.47928574, 0.39099644, 0.32349623, 0.27757851, 0.23166079],
-              [0.6440402 , 0.62518827, 0.55076698, 0.44448741, 0.36925856, 0.30213092, 0.23500329],
-              [0.75391673, 0.72629241, 0.62626668, 0.49791383, 0.41741569, 0.3135676 , 0.20971952],
-              [0.87466664, 0.83573268, 0.70577692, 0.53837968, 0.44090342, 0.25876522, 0.07662703],
-              [1.        , 0.92961537, 0.7332334 , 0.53288748, 0.42905484, 0.2518872 , 0.07471956]])
-    
-    thrust_ratio_spline = interpolate.RectBivariateSpline(X_dens_ratio, Y_Mach, Z_thr_ratio, kx=2, ky=2)
+        np.array([[0.24301874, 0.22386998, 0.17652686, 0.14221442, 0.11592392,
+                   0.09937799, 0.06240678],
+                  [0.3128897, 0.30047179, 0.26491134, 0.21632642, 0.17804871,
+                   0.1498797, 0.12426883],
+                  [0.38302311, 0.3725948, 0.33679446, 0.27993518, 0.23118738,
+                   0.20371041, 0.17623344],
+                  [0.45869702, 0.44896454, 0.40851692, 0.33699743, 0.27831082,
+                   0.24504059, 0.21177037],
+                  [0.54553835, 0.53270352, 0.47928574, 0.39099644, 0.32349623,
+                   0.27757851, 0.23166079],
+                  [0.6440402, 0.62518827, 0.55076698, 0.44448741, 0.36925856,
+                   0.30213092, 0.23500329],
+                  [0.75391673, 0.72629241, 0.62626668, 0.49791383, 0.41741569,
+                   0.3135676, 0.20971952],
+                  [0.87466664, 0.83573268, 0.70577692, 0.53837968, 0.44090342,
+                   0.25876522, 0.07662703],
+                  [1., 0.92961537, 0.7332334, 0.53288748, 0.42905484, 0.2518872,
+                   0.07471956]])
+
+    thrust_ratio_spline = interpolate.RectBivariateSpline(X_dens_ratio, Y_Mach,
+                                                          Z_thr_ratio, kx=2,
+                                                          ky=2)
 
     return thrust_ratio_spline(dens_ratio, mach)[0]
 
 
-
-
-
-
-
-
 def turbojetthrustfactor(temp_c, pressure_pa, mach, \
-throttleratio=1, afterburner=False):
+                         throttleratio=1, afterburner=False):
     """Multiply SL static thrust by this to get thrust at specified conditions"""
 
     # Model based on Mattingly, J. D., "Elements of Gas Turbine Propulsion",
@@ -1011,12 +1126,13 @@ throttleratio=1, afterburner=False):
         if theta0 <= throttleratio:
             return delta0 * (1 - 0.3 * (theta0 - 1) - 0.1 * np.sqrt(mach))
         return delta0 * (1 - 0.3 * (theta0 - 1) - 0.1 * np.sqrt(mach) - \
-        1.5 * (theta0 - throttleratio) / throttleratio)
+                         1.5 * (theta0 - throttleratio) / throttleratio)
 
     if theta0 <= throttleratio:
         return delta0 * 0.8 * (1 - 0.16 * np.sqrt(mach))
     return delta0 * 0.8 * (1 - 0.16 * np.sqrt(mach) - \
-24 * (theta0 - throttleratio) / ((9 + mach) * theta0))
+                           24 * (theta0 - throttleratio) / (
+                                   (9 + mach) * theta0))
 
 
 def pistonpowerfactor(density_kgpm3):

@@ -1,41 +1,72 @@
+<!--
+    Aircraft Design Recipes in Python (ADRpy)
+    Copyright (C) 2023  András Sóbesteer
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+
 ![ADRpy](https://github.com/sobester/ADRpy/raw/master/docs/ADRpy/ADRpy_splash.png)
 
-Aircraft Design Recipes in Python
-=================================
+<h1 align="center">Aircraft Design Recipes in Python</h1>
+<p align="center">András Sóbester, Yaseen Reza</p>
 
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![PyPI version](https://badge.fury.io/py/ADRpy.svg)](https://badge.fury.io/py/ADRpy)
 [![Build Status](https://travis-ci.com/sobester/ADRpy.svg?branch=master)](https://travis-ci.com/sobester/ADRpy)
 
-#  This fork of the ADRpy repository is archived and no longer under development by myself
+---
 
-A library of aircraft conceptual design and performance analysis tools, including
-virtual (design) atmospheres, constraint analysis methods, propulsion system 
-performance models, conversion functions and much else.
+ADRpy is an academic, teaching resource containing aircraft conceptual design
+and performance analysis tools such as:
+- Virtual (design) atmospheres
+- Constraint analysis methods
+- Propulsion system performance models
+- Unit conversion functions
+- *and much more...*
 
 For a detailed description of the library, please consult the
 [Documentation](https://adrpy.readthedocs.io/en/latest/). To get started,
 follow the instructions below.
 
-For video tutorials and explainers (a.k.a. *ADRpy Shorts*) scroll to the bottom of this page.
+For video tutorials and explainers (a.k.a. *ADRpy Shorts*) scroll to the bottom
+of this page.
 
-author: Andras Sobester
+Components of this library are written to be both easy to read and modify 
+without requiring significant coding knowledge. Confident coders looking for a
+more flexible and expandable library architecture may wish to check out ADRpy's
+companion library [CARPy](https://github.com/yaseen157/carpy/tree/main).
 
-Installation / Usage
---------------------
+---
 
-ADRpy is written in Python 3 and tested in Python 3.5, 3.6, 3.7 and 3.8.
+## Installation
 
-It is not available for Python 2.
+ADRpy is written in Python 3 and tested in Python versions 3.5 up to 3.9.
+
+*It is not available for Python 2.*
 
 On most systems you should be able to simply open an operating system terminal
 and at the command prompt type
 
-    $ pip install ADRpy
+    $ pip install -e ADRpy
     
 or
 
-    $ python -m pip install ADRpy
-    
+    $ python -m pip install -e ADRpy
+
+NOTE: the `-e` flag is optional, but recommended. It makes the ADRpy install
+*editable*, allowing users to poke and prod the machinery of the library. 
+
 NOTE: `pip` is a Python package; if it is not available on your system, download
 [get-pip.py](https://bootstrap.pypa.io/get-pip.py) and run it in Python by entering
 
@@ -51,9 +82,10 @@ at the command prompt and then executing the setup file in the same directory by
 
     $ python setup.py install
 
+---
     
-A 'hello world' example: atmospheric properties
------------------------------------------------
+## A 'hello world' example: atmospheric properties
+
 
 There are several options for running the examples shown here: you could copy and paste them 
 into a `.py` file, save it and run it in Python, or you could enter the lines, in sequence,
@@ -142,16 +174,17 @@ You should see the following output:
 
     Liftoff speed (KEAS): [  96.99203483  118.79049722  137.1674511   153.35787248]
 
+---
+## More extensive examples - a library of notebooks
 
-More extensive examples - a library of notebooks
-------------------------------------------------
 
 To view them on GitHub, go to [ADRpy's notebooks folder](https://github.com/sobester/ADRpy/tree/master/docs/ADRpy/notebooks).
 
 Alternatively, grab the whole repository as a .zip by clicking the big, green 'Code' button at the top of this page. 
 
-ADRpy Shorts - video tutorials and explainers
----------------------------------------------------------
+---
+## ADRpy Shorts - video tutorials and explainers
+
 
 **1. An Aircraft Engineer's Brief Introduction to Modelling the Atmosphere**
 

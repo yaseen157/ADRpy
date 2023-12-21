@@ -1,26 +1,10 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
-.. _constraints_module:
-
-Constraint Analysis Module
---------------------------
-
 This module contains tools for the constraint analysis of fixed
 wing aircraft.
-
 """
 
-__author__ = "Andras Sobester"
+__author__ = "András Sóbester, Yaseen Reza"
 
-# Other contributors: Yaseen Reza
-
-# pylint: disable=locally-disabled, too-many-instance-attributes
-# pylint: disable=locally-disabled, too-many-branches
-# pylint: disable=locally-disabled, too-many-statements
-# pylint: disable=locally-disabled, too-many-locals
-# pylint: disable=locally-disabled, too-many-lines
 
 import math
 import warnings
