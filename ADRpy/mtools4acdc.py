@@ -57,7 +57,7 @@ def panelplot_with_shared_y(vaxis, haxes, hlimits, vlabel,
     return figobj, axes
 
 
-def recastasnpfloatarray(scalarorvec):
+def recastasnpfloatarray(scalarorvec) -> np.ndarray:
     """Recasts an arbitrary argument as a numpy float array. Used
     internally by some of the constraint calculations to increase
     robustness, though the use of numpy arrays as inputs is the
@@ -96,7 +96,7 @@ def panelplot_with_shared_x(haxis, vaxes, hlabel,
 
     npanels = len(vaxes)
     figobj, axes = plt.subplots(npanels, 1, sharex=True)
-    
+
     plt.rc('text', usetex=tex)
     plt.rc('font', family=fam)
 
@@ -106,12 +106,12 @@ def panelplot_with_shared_x(haxis, vaxes, hlabel,
     plt.rc('xtick', labelsize=fontsizes[1])
     plt.rc('ytick', labelsize=fontsizes[1])
     plt.rc('legend', fontsize=fontsizes[2])
-    
+
     for i in range(npanels):
         axes[i].grid(True)
-        if type(vaxes[i])==list:
+        if type(vaxes[i]) == list:
             for j, vdata in enumerate(vaxes[i]):
-                axes[i].plot(haxis, vdata, label=vlabels[i][j+1])
+                axes[i].plot(haxis, vdata, label=vlabels[i][j + 1])
 
             axes[i].set_ylabel(vlabels[i][0])
             axes[i].legend(loc='best')
@@ -124,10 +124,10 @@ def panelplot_with_shared_x(haxis, vaxes, hlabel,
         for j, vli in enumerate(vlines):
             axes[i].plot([vli, vli], vertrange, color=vlinecols[j])
 
-    axes[npanels-1].set_xlabel(hlabel)
+    axes[npanels - 1].set_xlabel(hlabel)
 
     figobj.set_figwidth(figpar[0])
-    figobj.set_figheight(figpar[1]) 
+    figobj.set_figheight(figpar[1])
     figobj.dpi = figpar[2]
 
     return figobj, axes
@@ -221,36 +221,35 @@ def fdrplot(timeseriescsvfile, timeline, panels, markers, figpars):
     tlabel = timeline[1]
     ti = timeline[2]
     tf = timeline[3]
-    
+
     vlines = markers[0]
     vlinecols = markers[1]
-    
+
     plt.rcParams['axes.prop_cycle'] = cycler(color='bgrcmyk')
-    
+
     rawflightdata = pandas.read_csv(timeseriescsvfile)
-    
-    flightdata_tf = rawflightdata[(rawflightdata[tcol]>=ti) &
-                                  (rawflightdata[tcol]<=tf)]
+
+    flightdata_tf = rawflightdata[(rawflightdata[tcol] >= ti) &
+                                  (rawflightdata[tcol] <= tf)]
 
     timeaxis = flightdata_tf[tcol]
-    
+
     data_per_panel = []
     panel_y_labels = []
-    
+
     for panel in panels:
         panel_y_labels.append(panel[0])
         dataline = []
         for signalname in panel[1:]:
             dataline.append(flightdata_tf[signalname])
-        data_per_panel.append(dataline) 
-   
-    
+        data_per_panel.append(dataline)
+
     f, axes = panelplot_with_shared_x(
         timeaxis, data_per_panel, tlabel, panels,
         vlines, vlinecols,
         figpar=figpars[0], fontsizes=figpars[1])
 
-    if len(figpars)>2 and figpars[2]==1:
+    if len(figpars) > 2 and figpars[2] == 1:
         for ax in axes:
             ax.patch.set_facecolor('#deedfa')
             ax.spines['bottom'].set_color('white')
@@ -265,15 +264,15 @@ def fdrplot(timeseriescsvfile, timeline, panels, markers, figpars):
 
     plt.tight_layout(pad=0, h_pad=0, w_pad=None, rect=None)
     plt.show()
-    
+
     return f, axes, flightdata_tf
 
 
 def _coordtrans(x, z, theta_rad):
     xt = []
     zt = []
-    for i, _  in enumerate(x):
-        xt.append(x[i] * math.cos(theta_rad)  + z[i] * math.sin(theta_rad))
+    for i, _ in enumerate(x):
+        xt.append(x[i] * math.cos(theta_rad) + z[i] * math.sin(theta_rad))
         zt.append(-x[i] * math.sin(theta_rad) + z[i] * math.cos(theta_rad))
     return xt, zt
 
@@ -286,4 +285,3 @@ def iterable(obj):
         return False
     else:
         return True
-

@@ -16,7 +16,7 @@ from ADRpy.mtools4acdc import recastasnpfloatarray
 from ADRpy import unitconversions as uc
 
 __all__ = ["engine_catalogue", "EngineDeck", "TurbofanHiBPR", "TurbofanLoBPR",
-           "Turbojet", "Turboprop"]
+           "Turbojet", "Turboprop", "Piston", "SuperchargedPiston"]
 __author__ = "Yaseen Reza"
 
 # Other contributors: Samuel Pearson
@@ -57,20 +57,22 @@ class EngineDeck:
     _dataframes: dict
     _f_thrust = NotImplemented
     _f_thrust_SLTO = NotImplemented
+    _f_shaftpower = NotImplemented
 
     def __new__(cls, engine: str):
 
         validtypes = {  # generic deck types
-            "turbofanHiBPR": TurbofanHiBPR,
-            "turbofanLoBPR": TurbofanLoBPR,
-            "turbojet": Turbojet,
-            "turboprop": Turboprop,
-            "piston": Piston
+            TurbofanHiBPR.__name__: TurbofanHiBPR,
+            TurbofanLoBPR.__name__: TurbofanLoBPR,
+            Turbojet.__name__: Turbojet,
+            Turboprop.__name__: Turboprop,
+            Piston.__name__: Piston,
+            SuperchargedPiston.__name__: SuperchargedPiston
         }
         # If the engine specified is actually in the form "type:<x>"
-        if engine.startswith("type:"):
+        if engine.startswith("class:"):
 
-            enginetype = engine.lstrip("type:")
+            enginetype = engine.lstrip("class:")
             genericclass = validtypes.get(enginetype)
 
             if genericclass is None:
@@ -87,13 +89,14 @@ class EngineDeck:
         """
         Args:
             engine: Name of an engine for which data exists, or a string in the
-                form "type:<x>" where <x> is any of the following:
+                form "class:<x>" where <x> is any of the following:
 
-                - turbofanHiBPR
-                - turbofanLoBPR
-                - turbojet
-                - turboprop
-                - piston
+                - TurbofanHiBPR
+                - TurbofanLoBPR
+                - Turbojet
+                - Turboprop
+                - Piston
+                - SuperchargedPiston
 
         """
         if engine not in engine_catalogue:
@@ -123,7 +126,7 @@ class EngineDeck:
         """The raw dataframes extracted from engine data files."""
         return self._dataframes
 
-    def thrust(self, mach, altitude, *, norm: bool = None):
+    def thrust(self, mach, altitude, *, norm: bool = None, **kwargs):
         """
         Return the thrust available at the given flight conditions.
 
@@ -147,11 +150,11 @@ class EngineDeck:
         # Compute thrust (and normalise to sea-level static if needed)
         thrust = self._f_thrust(mach, altitude)
         if norm is True:
-            thrust = thrust / self._f_thrust(0, 0)
+            thrust = thrust / self._f_thrust(np.zeros(1), np.zeros(1))
 
         return thrust
 
-    def thrust_slto(self, mach, *, norm: bool = None):
+    def thrust_slto(self, mach, *, norm: bool = None, **kwargs):
         """
         Return the (augmented) thrust during takeoff, at sea level.
 
@@ -174,11 +177,39 @@ class EngineDeck:
         if self._f_thrust_SLTO is not NotImplemented:
             thrust = self._f_thrust_SLTO(mach, 0.0)
             if norm is True:
-                thrust = thrust / self._f_thrust(0, 0)
+                thrust = thrust / self._f_thrust(np.zeros(1), np.zeros(1))
         else:
             thrust = self.thrust(mach=mach, altitude=0.0, norm=norm)
 
         return thrust
+
+    def shaftpower(self, mach, altitude, *, norm: bool = None, **kwargs):
+        """
+        Return the shaftpower available at the given flight conditions.
+
+        Args:
+            mach: Flight Mach number.
+            altitude: Flight level (above mean sea level), in metres.
+            norm: Flag, whether to normalise the output to the sea-level static
+                power. Optional, defaults to False (no normalisation).
+
+        Returns:
+            The shaftpower developed by the propulsion system, in Watts. If
+            norm = True, this is just the ratio of available power to a static
+            sea-level performance datum.
+
+        """
+        # Recast as necessary
+        mach = recastasnpfloatarray(mach)
+        altitude = recastasnpfloatarray(altitude)
+        norm = False if norm is None else norm
+
+        # Compute thrust (and normalise to sea-level static if needed)
+        power = self._f_shaftpower(mach, altitude)
+        if norm is True:
+            power = power / self._f_shaftpower(np.zeros(1), np.zeros(1))
+
+        return power
 
 
 def TP0ratio(mach: np.ndarray, altitude: np.ndarray, atmosphere=None):
@@ -198,9 +229,9 @@ def TP0ratio(mach: np.ndarray, altitude: np.ndarray, atmosphere=None):
     atmosphere = isaref if atmosphere is None else atmosphere
 
     # Static quantity ratios
-    temp_K = uc.c2k(isaref.airtemp_c(altitude))
+    temp_K = uc.c2k(atmosphere.airtemp_c(altitude))
     theta = temp_K / 288.15  # static temperature ratio
-    press_Pa = isaref.airpress_pa(altitude)
+    press_Pa = atmosphere.airpress_pa(altitude)
     delta = press_Pa / 101325  # static pressure ratio
 
     # Convert to stagnation ratios
@@ -332,7 +363,7 @@ class TurbofanLoBPR:
 
         lapse = 0.6 * delta0
         slice = theta0 > TR
-        lapse[slice] -= (0.6 * delta0 * 3.8 * (theta0 - TR) / theta0)[slice]
+        lapse[slice] *= (1 - 3.8 * (theta0 - TR) / theta0)[slice]
 
         # Reframe the equation so sea-level static dry thrust is 1.0
         lapse *= 1 / 0.6
@@ -371,7 +402,7 @@ class TurbofanLoBPR:
 
         lapse = delta0
         slice = theta0 > TR
-        lapse[slice] -= (delta0 * 3.5 * (theta0 - TR) / theta0)[slice]
+        lapse[slice] *= (1 - 3.5 * (theta0 - TR) / theta0)[slice]
 
         # Reframe the equation so sea-level static dry thrust is 1.0
         lapse *= 1 / 0.6
@@ -555,7 +586,171 @@ class Turboprop:
 
 
 class Piston:
-    pass
+    """
+    Performance deck for a standard reciprocating engine.
+
+    References:
+        -   M. Saarlas, *Aircraft Performance*, Hoboken, New Jersey: John Wiley
+            & Sons, 2007. Appendix D.
+
+    """
+    name = "generic:Piston"
+    type = "piston"
+
+    @classmethod
+    def thrust(cls, mach, altitude, *, norm: bool = True, **kwargs):
+        """
+        Return the thrust available at the given flight conditions.
+
+        Args:
+            mach: Flight Mach number.
+            altitude: Flight level (above mean sea level), in metres.
+            norm: For generic propulsion system types, this must be set to True.
+
+        Keyword Args:
+            atmosphere: Alternative atmosphere object, if one is desired when
+                computing stagnation temperature and pressure ratios.
+            eta_prop: Efficiency in converting shaft power to flight power.
+                Optional, defaults to 0.85.
+
+        Returns:
+            The thrust developed by the propulsion system, in Newtons. If
+            norm = True, this is just the ratio of available thrust to a static
+            sea-level performance datum.
+
+        """
+        # Recast as necessary
+        mach = recastasnpfloatarray(mach)
+        altitude = recastasnpfloatarray(altitude)
+
+        if norm is not True:
+            errormsg = f"{cls.name} must use norm=True, found that {norm=}"
+            raise RuntimeError(errormsg)
+
+        eta_prop = kwargs.get("eta", 0.85)
+
+        powerlapse = cls.shaftpower(mach, altitude, norm=norm, **kwargs)
+        thrustlapse = eta_prop * powerlapse  # thrust lapse propto. power lapse
+
+        return np.clip(thrustlapse, 0, None)
+
+    @classmethod
+    def thrust_slto(cls, mach, **kwargs):
+        """
+        Return the takeoff thrust at sea level.
+
+        Args:
+            mach: Freestream Mach number.
+
+        Keyword Args:
+            norm: For generic propulsion system types, this must be set to True.
+            atmosphere: Alternative atmosphere object, if one is desired when
+                computing stagnation temperature and pressure ratios.
+
+        Returns:
+            The thrust developed by the propulsion system, in Newtons. If
+            norm = True, this is just the ratio of available thrust to a static
+            sea-level performance datum.
+
+        """
+        return cls.thrust(mach, altitude=0.0, **kwargs)
+
+    @classmethod
+    def shaftpower(cls, mach, altitude, *, norm: bool = True, **kwargs):
+        """
+        Return the shaftpower available at the given flight conditions.
+
+        Args:
+            mach: Flight Mach number.
+            altitude: Flight level (above mean sea level), in metres.
+            norm: For generic propulsion system types, this must be set to True.
+
+        Keyword Args:
+            atmosphere: Alternative atmosphere object, if one is desired when
+                computing stagnation temperature and pressure ratios.
+
+        Returns:
+            The shaftpower developed by the propulsion system, in Watts. If
+            norm = True, this is just the ratio of available power to a static
+            sea-level performance datum.
+
+        """
+        # Recast as necessary
+        # mach = recastasnpfloatarray(mach)
+        altitude = recastasnpfloatarray(altitude)
+        atmosphere = kwargs.get("atmosphere")
+        atmosphere = isaref if atmosphere is None else atmosphere
+
+        if norm is not True:
+            errormsg = f"{cls.name} must use norm=True, found that {norm=}"
+            raise RuntimeError(errormsg)
+
+        # Standard day density ratio
+        ambient_density = atmosphere.airdens_kgpm3(altitude)
+        sigma = ambient_density / 1.225
+
+        # Gagg-Farrar model
+        lapse = 1.132 * sigma - 0.132
+
+        return lapse
+
+
+class SuperchargedPiston(Piston):
+    """
+    Performance deck for a supercharged reciprocating engine.
+
+    References:
+        -   M. Saarlas, *Aircraft Performance*, Hoboken, New Jersey: John Wiley
+            & Sons, 2007. Appendix D.
+
+    """
+    name = "generic:SuperchargedPiston"
+    type = "piston"
+
+    @classmethod
+    def shaftpower(cls, mach, altitude, *, norm: bool = True, **kwargs):
+        """
+        Return the shaftpower available at the given flight conditions.
+
+        Args:
+            mach: Flight Mach number.
+            altitude: Flight level (above mean sea level), in metres.
+            norm: For generic propulsion system types, this must be set to True.
+
+        Keyword Args:
+            atmosphere: Alternative atmosphere object, if one is desired when
+                computing stagnation temperature and pressure ratios.
+
+        Returns:
+            The shaftpower developed by the propulsion system, in Watts. If
+            norm = True, this is just the ratio of available power to a static
+            sea-level performance datum.
+
+        """
+        # Recast as necessary
+        # mach = recastasnpfloatarray(mach)
+        altitude = recastasnpfloatarray(altitude)
+        atmosphere = kwargs.get("atmosphere")
+        atmosphere = isaref if atmosphere is None else atmosphere
+
+        if norm is not True:
+            errormsg = f"{cls.name} must use norm=True, found that {norm=}"
+            raise RuntimeError(errormsg)
+
+        # Standard day density ratio
+        manifold_air_density = atmosphere.airdens_kgpm3(altitude)
+        sigma = manifold_air_density / 1.225
+
+        # Supercharged model constant has performance to at least 25k ft
+        # ... work out the lapse the engines experience with density ratio
+        lapse = sigma ** 0.765
+        slice0 = altitude > uc.feet2m(36_089)
+        lapse[slice0] = 1.331 * sigma[slice0]
+        # ... offset the results to ensure constant performance below 25k ft
+        lapse25k = (atmosphere.airdens_kgpm3(uc.feet2m(25e3)) / 1.225) ** 0.765
+        lapse = np.clip(lapse + (1 - lapse25k), 0, 1.0)
+
+        return lapse
 
 
 def build_deck(deck: EngineDeck) -> None:
@@ -694,7 +889,8 @@ def xyz_interpolator(x: np.ndarray, y: typing.Union[np.ndarray, None],
 
     Args:
         x: Array of positive input coordinates (x >= 0).
-        y: Array of positive input coordinates (y >= 0).
+        y: Array of positive input coordinates (y >= 0). If set to None, a 2D
+            interpolator is still returned (with the y-argument ignored).
         z: Array of output values.
 
     Returns:

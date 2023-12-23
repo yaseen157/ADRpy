@@ -1,4 +1,4 @@
-"""Unit test for the weathertools module."""
+"""Unit tests for the weathertools module."""
 import unittest
 
 from ADRpy.weathertools import decodemetar
