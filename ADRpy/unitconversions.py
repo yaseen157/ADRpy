@@ -149,6 +149,16 @@ def kg2lbs(mass_kg):
     return mass_kg / 0.453592
 
 
+def kn2n(force_kn):
+    """Convert force from kN to N"""
+    return force_kn * 1e3
+
+
+def n2kn(force_n):
+    """Convert force from N to kN"""
+    return force_n / 1e3
+
+
 def lbf2n(force_lbf):
     """Convert force from lbf to N"""
     return force_lbf / 0.224809
@@ -157,6 +167,16 @@ def lbf2n(force_lbf):
 def n2lbf(force_n):
     """Convert force from N to lbf"""
     return force_n * 0.224809
+
+
+def lbf2kn(force_lbf):
+    """Convert force from lbf to kN"""
+    return lbf2n(force_lbf) / 1e3
+
+
+def kn2lbf(force_n):
+    """Convert force from kN to lbf"""
+    return n2lbf(force_n) * 1e3
 
 
 def wn2wkg(powertoweight_wn):
@@ -174,6 +194,16 @@ def wn2hpkg(powertoweight_wn):
     return wn2kwkg(powertoweight_wn) * 1.34102
 
 
+def w2kw(power_w):
+    """Convert power from watts to kilowatts"""
+    return power_w / 1e3
+
+
+def kw2w(power_kw):
+    """Convert power from kilowatts to watts"""
+    return power_kw * 1e3
+
+
 def kw2hp(power_kw):
     """Convert power from kW to HP"""
     return power_kw * 1.34102
@@ -182,6 +212,16 @@ def kw2hp(power_kw):
 def hp2kw(power_hp):
     """Convert power from HP to kW"""
     return power_hp / 1.34102
+
+
+def w2hp(power_w):
+    """Convert power from W to HP"""
+    return kw2hp(power_w / 1e3)
+
+
+def hp2w(power_hp):
+    """Convert power from HP to kW"""
+    return hp2kw(power_hp) * 1e3
 
 
 def kgm32sft3(density_kgm3):

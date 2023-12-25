@@ -92,7 +92,7 @@ class CertificationSpecifications:
         # Build an aircraft object based on the design dictionaries and atmosphere object
         self.acobj = ca.AircraftConcept(brief=brief, design=design,
                                         performance=performance,
-                                        designatm=designatm)
+                                        atmosphere=designatm)
 
         # Specify default flags or parameters for the Vn definitions dictionary, if parameter is left unspecified
 

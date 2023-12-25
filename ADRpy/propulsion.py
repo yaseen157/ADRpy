@@ -136,6 +136,10 @@ class EngineDeck:
             norm: Flag, whether to normalise the output to the sea-level static
                 thrust. Optional, defaults to False (no normalisation).
 
+        Keyword Args:
+            eta_prop: Efficiency in converting shaft power to flight power.
+                Optional, defaults to 0.85.
+
         Returns:
             The thrust developed by the propulsion system, in Newtons. If
             norm = True, this is just the ratio of available thrust to a static
@@ -145,10 +149,20 @@ class EngineDeck:
         # Recast as necessary
         mach = recastasnpfloatarray(mach)
         altitude = recastasnpfloatarray(altitude)
-        norm = False if norm is None else norm
+        norm = True if norm else False
 
         # Compute thrust (and normalise to sea-level static if needed)
-        thrust = self._f_thrust(mach, altitude)
+        if self._f_thrust is NotImplemented:
+            if norm is True:
+                raise RuntimeError("Can't find static thrust!")
+            eta_prop = kwargs.get("eta_prop", 0.85)
+            shaftpower = self.shaftpower(mach, altitude, norm=False)
+            soundspeed = isaref.vsound_mps(altitude)
+            airspeed = mach * soundspeed
+            thrust = eta_prop * shaftpower / airspeed
+        else:
+            thrust = self._f_thrust(mach, altitude)
+
         if norm is True:
             thrust = thrust / self._f_thrust(np.zeros(1), np.zeros(1))
 
@@ -163,6 +177,10 @@ class EngineDeck:
             norm: Flag, whether to normalise the output to the sea-level static
                 thrust. Optional, defaults to False (no normalisation).
 
+        Keyword Args:
+            eta_prop: Efficiency in converting shaft power to flight power.
+                Optional, defaults to 0.85.
+
         Returns:
             The thrust developed by the propulsion system, in Newtons. If
             norm = True, this is just the ratio of available thrust to a static
@@ -171,11 +189,11 @@ class EngineDeck:
         """
         # Recast as necessary
         mach = recastasnpfloatarray(mach)
-        norm = False if norm is None else norm
+        norm = True if norm else False
 
         # Compute thrust (and normalise to sea-level static if needed)
         if self._f_thrust_SLTO is not NotImplemented:
-            thrust = self._f_thrust_SLTO(mach, 0.0)
+            thrust = self._f_thrust(mach, 0.0)
             if norm is True:
                 thrust = thrust / self._f_thrust(np.zeros(1), np.zeros(1))
         else:
@@ -190,6 +208,8 @@ class EngineDeck:
         Args:
             mach: Flight Mach number.
             altitude: Flight level (above mean sea level), in metres.
+
+        Keyword Args:
             norm: Flag, whether to normalise the output to the sea-level static
                 power. Optional, defaults to False (no normalisation).
 
@@ -202,7 +222,7 @@ class EngineDeck:
         # Recast as necessary
         mach = recastasnpfloatarray(mach)
         altitude = recastasnpfloatarray(altitude)
-        norm = False if norm is None else norm
+        norm = True if norm else False
 
         # Compute thrust (and normalise to sea-level static if needed)
         power = self._f_shaftpower(mach, altitude)
@@ -627,7 +647,7 @@ class Piston:
             errormsg = f"{cls.name} must use norm=True, found that {norm=}"
             raise RuntimeError(errormsg)
 
-        eta_prop = kwargs.get("eta", 0.85)
+        eta_prop = kwargs.get("eta_prop", 0.85)
 
         powerlapse = cls.shaftpower(mach, altitude, norm=norm, **kwargs)
         thrustlapse = eta_prop * powerlapse  # thrust lapse propto. power lapse
@@ -646,6 +666,8 @@ class Piston:
             norm: For generic propulsion system types, this must be set to True.
             atmosphere: Alternative atmosphere object, if one is desired when
                 computing stagnation temperature and pressure ratios.
+            eta_prop: Efficiency in converting shaft power to flight power.
+                Optional, defaults to 0.85.
 
         Returns:
             The thrust developed by the propulsion system, in Newtons. If
@@ -739,13 +761,13 @@ class SuperchargedPiston(Piston):
 
         # Standard day density ratio
         manifold_air_density = atmosphere.airdens_kgpm3(altitude)
-        sigma = manifold_air_density / 1.225
+        sigma = recastasnpfloatarray(manifold_air_density / 1.225)
 
         # Supercharged model constant has performance to at least 25k ft
         # ... work out the lapse the engines experience with density ratio
         lapse = sigma ** 0.765
         slice0 = altitude > uc.feet2m(36_089)
-        lapse[slice0] = 1.331 * sigma[slice0]
+        lapse[slice0] = 1.331 * sigma[slice0]  # requirement: sigma is an array!
         # ... offset the results to ensure constant performance below 25k ft
         lapse25k = (atmosphere.airdens_kgpm3(uc.feet2m(25e3)) / 1.225) ** 0.765
         lapse = np.clip(lapse + (1 - lapse25k), 0, 1.0)
