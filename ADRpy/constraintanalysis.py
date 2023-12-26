@@ -454,14 +454,12 @@ class AircraftConcept:
         LDmax = CL / (CDmin + k * CL ** 2)
         return LDmax
 
-    def get_bestclimbangle_Vx(self, wingloading_pa, **kwargs):
+    def get_bestclimbangle_Vx(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, Vx, which results in the best angle of climb.
 
         Args:
             wingloading_pa: Aircraft wing loading, in Pascal.
-
-        Keyword Args:
             altitude_m: Geopotential altitude, in metres.
 
         Returns:
@@ -474,7 +472,8 @@ class AircraftConcept:
         """
         # Recast as necessary
         wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        altitude_m = actools.recastasnpfloatarray(kwargs.get("altitude_m", 0.0))
+        altitude_m = 0 if altitude_m is None else altitude_m
+        altitude_m = actools.recastasnpfloatarray(altitude_m)
         wingloading_pa, altitude_m \
             = np.broadcast_arrays(wingloading_pa, altitude_m)
         CDmin = getattr(self.performance, "CDmin")
@@ -545,15 +544,14 @@ class AircraftConcept:
 
         return bestspeed_mps
 
-    def get_bestclimbrate_Vy(self, wingloading_pa, **kwargs):
+    def get_bestclimbrate_Vy(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, Vy, which results in the best rate of climb.
 
         Args:
             wingloading_pa: Aircraft wing loading, in Pascal.
-
-        Keyword Args:
-            altitude_m: Geopotential altitude, in metres.
+            altitude_m: Geopotential altitude, in metres. Optional, defaults to
+                sea-level (0 metres).
 
         Returns:
             Best rate of climb speed Vy, in metres per second.
@@ -565,7 +563,9 @@ class AircraftConcept:
         """
         # Recast as necessary
         wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        altitude_m = actools.recastasnpfloatarray(kwargs.get("altitude_m", 0.0))
+        altitude_m = 0 if altitude_m is None else altitude_m
+        altitude_m = actools.recastasnpfloatarray(altitude_m)
+
         wingloading_pa, altitude_m \
             = np.broadcast_arrays(wingloading_pa, altitude_m)
         CDmin = getattr(self.performance, "CDmin")
@@ -676,7 +676,7 @@ class AircraftConcept:
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=climbspeed_mpstas, altitude_m=climbalt_m)
         ws_pa = wingloading_pa * wcorr
-        wslim_pa = CLmax * q_pa
+        wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             warnings.warn(warnmsg, RuntimeWarning)
@@ -756,7 +756,7 @@ class AircraftConcept:
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=cruisespeed_mpstas, altitude_m=cruisealt_m)
         ws_pa = wingloading_pa * wcorr
-        wslim_pa = CLmax * q_pa
+        wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             warnings.warn(warnmsg, RuntimeWarning)
@@ -829,7 +829,7 @@ class AircraftConcept:
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=secclimbspd_mpstas, altitude_m=servceil_m)
         ws_pa = wingloading_pa * wcorr
-        wslim_pa = CLmax * q_pa
+        wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             warnings.warn(warnmsg, RuntimeWarning)
@@ -976,7 +976,7 @@ class AircraftConcept:
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=turnspeed_mpstas, altitude_m=turnalt_m)
         ws_pa = wingloading_pa * wcorr
-        wslim_pa = CLmax * q_pa
+        wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             warnings.warn(warnmsg, RuntimeWarning)
