@@ -16,6 +16,89 @@ from ADRpy import propulsion as pdecks
 __author__ = "Yaseen Reza"
 
 
+def make_modified_drag_model(CDmin, k, CLmax, CLminD):
+    """
+    Return a function f, which computes the coefficient of drag as a function of
+    the coefficient of lift, i.e. CD=f(CL).
+
+    Args:
+        CDmin: The minimum drag coefficient to use in the drag model.
+        k: The induced drag factor, as seen in CD = CDmin + k * CL ** 2.
+        CLmax: The maximum allowable coefficient of lift of the drag model.
+        CLminD: The coefficient of lift at which the drag model is minimised.
+
+    Returns:
+        A function, CD = f(CL).
+
+    References:
+        Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
+        and Procedures," 1st ed., Elselvier, 2014.
+    """
+    def quadratic(CL, _CDmin, _k):
+        """Standard, classical quadratic model for drag."""
+        return _CDmin + _k * CL ** 2
+
+    def quadratic_adjusted(CL, _CDmin, _k, _CLminD):
+        """Quadratic model adjusted for CL of minimum CD."""
+        return quadratic(CL=(CL - _CLminD), _CDmin=_CDmin, _k=_k)
+
+    def get_quadratic_modified(_CDmin, _k, _CLminD, _CLmax):
+        """Make a quadratic drag model with spline modification."""
+
+        # Estimate point of switching to quadratic spline
+        CLm = 0.5 * (_CLminD + _CLmax)
+
+        # Estimate the CDstall about 180% of the quadratic model
+        CDstall = 1.8 * quadratic_adjusted(
+            _CDmin=_CDmin, _k=_k, CL=_CLmax, _CLminD=_CLminD)
+
+        # As per [1], fit a spline to produce a modified drag model
+        matA = np.array([
+            [CLm ** 2, CLm, 1],
+            [2 * CLm, 1, 0],
+            [_CLmax ** 2, _CLmax, 1]
+        ])
+        matB = np.array([
+            quadratic_adjusted(_CDmin=_CDmin, _k=_k, CL=CLm, _CLminD=_CLminD),
+            2 * _k * (CLm - _CLminD),
+            CDstall
+        ])
+        A, B, C = np.linalg.solve(matA, matB)
+
+        def drag_model(CL):
+            """
+            A modified, adjusted drag model.
+
+            Args:
+                CL: Coefficent of lift.
+
+            Returns:
+                The coefficient of drag, CD.
+
+            """
+            # Recast as necessary
+            CL = actools.recastasnpfloatarray(CL)
+
+            # Switch between models as we need to
+            CDmod = A * CL ** 2 + B * CL + C
+            CDquad = quadratic_adjusted(
+                _CDmin=_CDmin, _k=_k, CL=CL, _CLminD=_CLminD)
+            CD = np.where(CL <= CLm, CDquad, CDmod)
+
+            if (CL > _CLmax).any():
+                warnmsg = f"Coefficient of lift exceeded CLmax={_CLmax}"
+                warnings.warn(warnmsg, category=RuntimeWarning)
+                CD[CL > _CLmax] = np.nan
+
+            return CD
+
+        return drag_model
+
+    model2return = get_quadratic_modified(
+        _CDmin=CDmin, _k=k, _CLminD=CLminD, _CLmax=CLmax)
+
+    return model2return
+
 class AircraftConcept:
     """
     Definition of a basic aircraft concept. An object of this class defines an
@@ -181,7 +264,12 @@ class AircraftConcept:
 
                 CLmax
                     Float. Maximum lift coefficient in flight, in clean
-                    configuration.
+                    configuration. Optional, defaults to 1.1.
+
+                CLminD
+                    Float. The coefficient of lift at which the drag coefficient
+                        is minimised, in clean configuration. Optional, defaults
+                        to 0.2.
 
                 eta_prop
                     Dictionary. Propeller efficiency in various phases of the
@@ -264,12 +352,13 @@ class AircraftConcept:
         # Drag/resistance coefficients
         performance.setdefault("CD0TO")
         performance.setdefault("CDTO")
-        performance.setdefault("CDmin")
-        performance.setdefault("mu_R")
+        performance.setdefault("CDmin", 0.03)
+        performance.setdefault("mu_R", 0.03)
         # Lift coefficients
         performance.setdefault("CLTO", 0.95)
         performance.setdefault("CLmaxTO", 1.5)
-        performance.setdefault("CLmax")
+        performance.setdefault("CLmax", 1.1)
+        performance.setdefault("CLminD", 0.2)
         # Propulsive efficiencies
         performance.setdefault("eta_prop", dict())
         performance["eta_prop"].setdefault("climb", 0.75)
@@ -298,6 +387,8 @@ class AircraftConcept:
         self.performance = type("performance", (object,), performance)
         self.designatm = atmosphere
         self.propulsion = propulsion
+
+
 
         return
 
@@ -649,6 +740,7 @@ class AircraftConcept:
         climbrate_fpm = getattr(self.brief, "climbrate_fpm")
         CDmin = getattr(self.performance, "CDmin")
         CLmax = getattr(self.performance, "CLmax")
+        CLminD = getattr(self.performance, "CLminD")
 
         # Determine the thrust and power lapse corrections
         climbspeed_mpsias = co.kts2mps(climbspeed_kias)
@@ -682,22 +774,24 @@ class AircraftConcept:
             warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
-        # ... induced drag factor
-        k = self.cdi_factor(mach=mach, method="Nita-Scholz")
-
-        # ... rate of climb penalty
+        # ... load factor due to climb
         climbrate_mps = co.fpm2mps(climbrate_fpm)
         climbrate_mpstroc = self.designatm.eas2tas(
             eas=climbrate_mps, altitude_m=climbalt_m)
-        cos_sq_theta = (1 - (climbrate_mpstroc / climbspeed_mpstas) ** 2)
+        cos_theta = (1 - (climbrate_mpstroc / climbspeed_mpstas) ** 2) ** 0.5
+
+        # ... coefficient of drag
+        k = self.cdi_factor(mach=mach, method="Nita-Scholz")
+        f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
+        CL = ws_pa * cos_theta / q_pa
+        CD = f_CD(CL)
 
         # ... "acceleration factor"
-        Ka = 1.0
+        Ka = 1.0  # Small climb angle approximation! dV/dh ~ 0...
 
         # ... T/W (mapped to sea-level static)
         tw = (
-                     q_pa * CDmin / ws_pa
-                     + k / q_pa * ws_pa * cos_sq_theta
+                     q_pa * CD / ws_pa
                      + Ka * climbrate_mpstroc / climbspeed_mpstas
              ) / tcorr
 
@@ -733,6 +827,7 @@ class AircraftConcept:
         cruisethrustfact = getattr(self.brief, "cruisethrustfact")
         CDmin = getattr(self.performance, "CDmin")
         CLmax = getattr(self.performance, "CLmax")
+        CLminD = getattr(self.performance, "CLminD")
 
         # Determine the thrust and power lapse corrections
         cruisespeed_mpstas = co.kts2mps(cruisespeed_ktas)
@@ -762,14 +857,14 @@ class AircraftConcept:
             warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
-        # ... induced drag factor
+        # ... coefficient of drag
         k = self.cdi_factor(mach=mach, method="Nita-Scholz")
+        f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
+        CL = ws_pa / q_pa
+        CD = f_CD(CL)
 
         # ... T/W (mapped to sea-level static)
-        tw = (
-                     q_pa * CDmin / ws_pa
-                     + k / q_pa * ws_pa
-             ) / tcorr
+        tw = (q_pa * CD / ws_pa) / tcorr
 
         # ... P/W (mapped to sea-level static)
         pw = (tw * tcorr) * cruisespeed_mpstas / pcorr
@@ -802,6 +897,7 @@ class AircraftConcept:
         secclimbspd_kias = getattr(self.brief, "secclimbspd_kias")
         CDmin = getattr(self.performance, "CDmin")
         CLmax = getattr(self.performance, "CLmax")
+        CLminD = getattr(self.performance, "CLminD")
 
         # Determine the thrust and power lapse corrections
         secclimbspd_mpsias = co.kts2mps(secclimbspd_kias)
@@ -835,20 +931,24 @@ class AircraftConcept:
             warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
-        # ... induced drag factor
-        k = self.cdi_factor(mach=mach, method="Nita-Scholz")
-
+        # ... load factor due to climb
         # Service ceiling typically defined in terms of climb rate (at best
         # climb speed) dropping to 100feet/min ~ 0.508m/s
         climbrate_mps = co.fpm2mps(100)
         # What true climb rate does 100 feet/minute correspond to?
         climbrate_mpstroc = self.designatm.eas2tas(
             eas=climbrate_mps, altitude_m=servceil_m)
+        cos_theta = (1 - (climbrate_mpstroc / secclimbspd_mpstas) ** 2) ** 0.5
+
+        # ... coefficient of drag
+        k = self.cdi_factor(mach=mach, method="Nita-Scholz")
+        f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
+        CL = ws_pa * cos_theta / q_pa
+        CD = f_CD(CL)
 
         # ... T/W (mapped to sea-level static)
         tw = (
-                     q_pa * CDmin / ws_pa
-                     + k / q_pa * ws_pa
+                     q_pa * CD / ws_pa
                      + climbrate_mpstroc / secclimbspd_mpstas
              ) / tcorr
 
@@ -953,6 +1053,7 @@ class AircraftConcept:
         turnspeed_ktas = getattr(self.brief, "turnspeed_ktas")
         CDmin = getattr(self.performance, "CDmin")
         CLmax = getattr(self.performance, "CLmax")
+        CLminD = getattr(self.performance, "CLminD")
 
         # Determine the thrust and power lapse corrections
         turnspeed_mpstas = co.kts2mps(turnspeed_ktas)
@@ -982,14 +1083,14 @@ class AircraftConcept:
             warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
-        # ... induced drag factor
+        # ... coefficient of drag
         k = self.cdi_factor(mach=mach, method="Nita-Scholz")
+        f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
+        CL = ws_pa * stloadfactor / q_pa
+        CD = f_CD(CL)
 
         # ... T/W (mapped to sea-level static)
-        tw = (
-                     q_pa * CDmin / ws_pa
-                     + k / q_pa * ws_pa * stloadfactor ** 2
-             ) / tcorr
+        tw = (q_pa * CD / ws_pa) / tcorr
 
         # ... P/W (mapped to sea-level static)
         pw = (tw * tcorr) * turnspeed_mpstas / pcorr
