@@ -1,9 +1,5 @@
-"""
-
-
-"""
+"""Unit test that automatically runs the example notebooks."""
 import os
-import shutil
 import unittest
 
 import nbformat
@@ -40,6 +36,8 @@ class RunNotebooks(unittest.TestCase):
                 return
 
         # Run every notebook
+        failed2open = []
+        failed2run = []
         for filename, src_path in notebooks_paths.items():
 
             # Load the notebook
@@ -47,16 +45,12 @@ class RunNotebooks(unittest.TestCase):
                 with open(src_path) as f:
                     nb = nbformat.read(f, as_version=4)
             except UnicodeDecodeError:
-                print(f"Error opening {filename}, skipping test for this file")
+                failed2open.append(filename)
                 continue
 
             # Configure a notebook executor
             try:
-                ep = ExecutePreprocessor(
-                    timeout=60,
-                    kernel_name='python3',
-                    allow_errors=False  # <-- What makes this unit test useful!
-                )
+                ep = ExecutePreprocessor(timeout=60, kernel_name='python3')
             except Exception as e:
                 raise Exception("Check advice in this test's notes?") from e
 
@@ -64,19 +58,28 @@ class RunNotebooks(unittest.TestCase):
                 # Run the notebook
                 out = ep.preprocess(nb, {'metadata': {'path': notebooks_src}})
             except CellExecutionError:
+                # If we have allowed errors, prepare report to the developer
                 out = None
-                msg = f'Error executing the notebook "{filename}".\n\n'
-                msg += f'See notebook "{src_path}" for the traceback.'
-                print(msg)
-                raise
-            # finally:
-            #     with open(out_path, mode='w', encoding='utf-8') as f:
-            #         nbformat.write(nb, f)
+                failed2run.append(filename)
+            finally:
+                # Save the notebook (and any tracebacks)
+                with open(src_path, mode='w', encoding='utf-8') as f:
+                    nbformat.write(nb, f)
+
+        # Pretty printing for unittest runner
+        if failed2open or failed2run:
+            print("")
+        if failed2open:
+            print(f"[!] These notebook(s) couldn't be tested:"
+                  f"\n\t> " + "\n\t> ".join(failed2open))
+        if failed2run:
+            print(f"[!] These notebook(s) threw errors:"
+                  f"\n\t> " + "\n\t> ".join(failed2run))
+            print(f"Saved tracebacks in '{notebooks_src}'")
+            self.fail(f"One or more notebooks failed to run")
 
         return
 
 
 if __name__ == '__main__':
     unittest.main()
-
-
