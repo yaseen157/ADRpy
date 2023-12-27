@@ -99,6 +99,112 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
 
     return model2return
 
+
+def get_default_concept_design_objects():
+    class BaseMethods:
+        """Default methods to run on instantiation."""
+        def __init__(self, dictionary: dict=None):
+            """
+            Args:
+                dictionary: key-value pairs with which to update default args.
+            """
+            if dict is None:
+                return
+
+            for key, value in dictionary.items():
+                # If we already have a default value
+                if hasattr(self, key):
+                    # A value that is type dict, should update the original dict
+                    if isinstance(value, dict):
+                        currentdict = getattr(self, key)
+                        setattr(self, key, {**currentdict, **value})
+                    else:
+                        setattr(self, key, value)
+                # There is no default value, but the parameter exists, so set it
+                elif hasattr(self, "__annotations__") and (key in self.__annotations__):
+                    setattr(self, key, value)
+                else:
+                    errormsg = f"Unknown {key=} for {type(self).__name__}"
+                    raise KeyError(errormsg)
+            return
+
+    class DesignBrief(BaseMethods):
+        """Parameters of the aircraft design brief."""
+        # Climb constraint
+        climbalt_m = 0.0
+        climbspeed_kias: float
+        climbrate_fpm: float
+        # Cruise constraint
+        cruisealt_m: float
+        cruisespeed_ktas: float
+        cruisethrustfact = 1.0
+        # Service ceiling constraint
+        servceil_m: float
+        secclimbspd_kias: float
+        # Stall constraint
+        vstallclean_kcas: float
+        # Take-off constraint
+        groundrun_m: float
+        rwyelevation_m = 0.0
+        # Sustained turn constraint
+        stloadfactor: float
+        turnalt_m = 0.0
+        turnspeed_ktas: float
+
+    class DesignDefinition(BaseMethods):
+        """Parameters of the aircraft design definition."""
+        # Geometry definitions
+        aspectratio = 8.0
+        sweep_le_deg = 0.0
+        sweep_mt_deg: float
+        sweep_25_deg: float
+        taperratio: float
+        # Weight and loading
+        weight_n: float
+        weightfractions = {
+            x: 1.0
+            for x in ["climb", "cruise", "servceil", "take-off", "turn"]
+        }
+
+        def __init__(self, definition: dict):
+            super().__init__(dictionary=definition)
+
+            if not hasattr(self, "sweep_mt_deg"):
+                self.sweep_mt_deg = self.sweep_le_deg
+
+            if not hasattr(self, "sweep_25_deg"):
+                self.sweep_25_deg = (
+                    (2 / 7) * self.sweep_le_deg + (5 / 7) * self.sweep_mt_deg)
+
+            if not hasattr(self, "taperratio"):
+                # Optimal root taper ratio (if one is not provided)
+                # https://www.fzt.haw-hamburg.de/pers/Scholz/OPerA/OPerA_PRE_DLRK_12-09-10_MethodOnly.pdf
+                self.taperratio = 0.45 * np.exp(-0.0375 * self.sweep_25_deg)
+
+    class DesignPerformance(BaseMethods):
+
+        # Drag/resistance coefficients
+        CD0TO: float
+        CDTO: float
+        CDmin = 0.03
+        mu_R = 0.03
+        # Lift coefficients
+        CL0 = 0.0
+        CLTO = 0.95
+        CLmaxTO = 1.5
+        CLmax = 1.1
+        CLminD = 0.2
+        # Propulsive efficiencies
+        eta_prop = dict([
+            ("climb", 0.75), ("cruise", 0.85), ("servceil", 0.65),
+            ("take-off", 0.45), ("turn", 0.85)
+        ])
+
+    return DesignBrief, DesignDefinition, DesignPerformance
+
+_class_brief, _class_definition, _class_performance = (
+    get_default_concept_design_objects())
+
 class AircraftConcept:
     """
     Definition of a basic aircraft concept. An object of this class defines an
@@ -111,6 +217,9 @@ class AircraftConcept:
     and engine decks in the `propulsion module <https://adrpy.readthedocs.io/en/latest/#propulsion>`_.
 
     """
+    brief: _class_brief
+    design: _class_definition
+    performance: _class_performance
 
     def __init__(self, brief: dict = None, design: dict = None,
                  performance: dict = None,
@@ -283,78 +392,14 @@ class AircraftConcept:
                 *SuperchargedPiston*. Optional, defaults to *Piston*.
 
         """
-        # Parse the input arguments
-        for variable in ["brief", "design", "performance"]:
-            if eval(f"{variable} is None"):
-                exec(f"{variable} = dict()")  # Set to empty dict if necessary
 
-        # ----- DESIGN BRIEF HANDLING -----
-        # Climb constraint
-        brief.setdefault("climbalt_m", 0.0)
-        brief.setdefault("climbspeed_kias")
-        brief.setdefault("climbrate_fpm")
-        # Cruise constraint
-        brief.setdefault("cruisealt_m")
-        brief.setdefault("cruisespeed_ktas")
-        brief.setdefault("cruisethrustfact", 1.0)
-        # Service ceiling constraint
-        brief.setdefault("servceil_m")
-        brief.setdefault("secclimbspd_kias")
-        # Stall constraint
-        brief.setdefault("vstallclean_kcas")
-        # Take-off constraint
-        brief.setdefault("groundrun_m")
-        brief.setdefault("rwyelevation_m", 0.0)
-        # Sustained turn constraint
-        brief.setdefault("stloadfactor")
-        brief.setdefault("turnalt_m", 0.0)
-        brief.setdefault("turnspeed_ktas")
+        # Recast as necessary
+        self.brief = _class_brief(brief)
+        self.design = _class_definition(design)
+        self.performance = _class_performance(performance)
+        self.designatm = at.Atmosphere() if atmosphere is None else atmosphere
 
-        # ----- CONCEPT DESIGN HANDLING -----
-        # Geometry definitions
-        design.setdefault("aspectratio", 8.0)
-        design.setdefault("sweep_le_deg", 0.0)
-        design.setdefault("sweep_mt_deg", design["sweep_le_deg"])
-        design.setdefault(
-            "sweep_25_deg",
-            (2 / 7) * design["sweep_le_deg"] + (5 / 7) * design[
-                "sweep_mt_deg"]
-        )
-        design.setdefault(
-            "taperratio",
-            # Optimal root taper ratio (if one is not provided)
-            # https://www.fzt.haw-hamburg.de/pers/Scholz/OPerA/OPerA_PRE_DLRK_12-09-10_MethodOnly.pdf
-            0.45 * np.exp(-0.0375 * design["sweep_25_deg"])
-        )
-        # Weight and loading
-        design.setdefault("weight_n")
-        design.setdefault("weightfractions", dict())
-        design["weightfractions"].setdefault("climb", 1.0)
-        design["weightfractions"].setdefault("cruise", 1.0)
-        design["weightfractions"].setdefault("servceil", 1.0)
-        design["weightfractions"].setdefault("take-off", 1.0)
-        design["weightfractions"].setdefault("turn", 1.0)
-
-        # ----- CONCEPT PERFORMANCE HANDLING -----
-        # Drag/resistance coefficients
-        performance.setdefault("CD0TO")
-        performance.setdefault("CDTO")
-        performance.setdefault("CDmin", 0.03)
-        performance.setdefault("mu_R", 0.03)
-        # Lift coefficients
-        performance.setdefault("CLTO", 0.95)
-        performance.setdefault("CLmaxTO", 1.5)
-        performance.setdefault("CLmax", 1.1)
-        performance.setdefault("CLminD", 0.2)
-        # Propulsive efficiencies
-        performance.setdefault("eta_prop", dict())
-        performance["eta_prop"].setdefault("climb", 0.75)
-        performance["eta_prop"].setdefault("cruise", 0.85)
-        performance["eta_prop"].setdefault("servceil", 0.65)
-        performance["eta_prop"].setdefault("take-off", 0.45)
-        performance["eta_prop"].setdefault("turn", 0.85)
-
-        # ----- PROPULSION HANDLING -----
+        # Propulsion handling
         propulsion = "Piston" if propulsion is None else propulsion
         if isinstance(
                 propulsion,
@@ -369,93 +414,9 @@ class AircraftConcept:
             raise ValueError(f"{propulsion=} is an invalid choice")
 
         # Make parameters accessible to the public
-        self.brief = type("brief", (object,), brief)
-        self.design = type("design", (object,), design)
-        self.performance = type("performance", (object,), performance)
-        self.designatm = atmosphere
         self.propulsion = propulsion
 
         return
-    @staticmethod
-    def _default_design():
-        """
-        Set the default parameters for the design brief, the design definition,
-        and the design performance dictionaries.
-
-        Returns:
-            Tuple of default design dictionaries (brief, design, performance).
-
-        """
-        brief = dict()
-        design = dict()
-        performance = dict()
-
-        # ----- DESIGN BRIEF HANDLING -----
-        # Climb constraint
-        brief.setdefault("climbalt_m", 0.0)
-        brief.setdefault("climbspeed_kias")
-        brief.setdefault("climbrate_fpm")
-        # Cruise constraint
-        brief.setdefault("cruisealt_m")
-        brief.setdefault("cruisespeed_ktas")
-        brief.setdefault("cruisethrustfact", 1.0)
-        # Service ceiling constraint
-        brief.setdefault("servceil_m")
-        brief.setdefault("secclimbspd_kias")
-        # Stall constraint
-        brief.setdefault("vstallclean_kcas")
-        # Take-off constraint
-        brief.setdefault("groundrun_m")
-        brief.setdefault("rwyelevation_m", 0.0)
-        # Sustained turn constraint
-        brief.setdefault("stloadfactor")
-        brief.setdefault("turnalt_m", 0.0)
-        brief.setdefault("turnspeed_ktas")
-
-        # ----- CONCEPT DESIGN HANDLING -----
-        # Geometry definitions
-        design.setdefault("aspectratio", 8.0)
-        design.setdefault("sweep_le_deg", 0.0)
-        design.setdefault("sweep_mt_deg", design["sweep_le_deg"])
-        design.setdefault(
-            "sweep_25_deg",
-            (2 / 7) * design["sweep_le_deg"] + (5 / 7) * design["sweep_mt_deg"]
-        )
-        design.setdefault(
-            "taperratio",
-            # Optimal root taper ratio (if one is not provided)
-            # https://www.fzt.haw-hamburg.de/pers/Scholz/OPerA/OPerA_PRE_DLRK_12-09-10_MethodOnly.pdf
-            0.45 * np.exp(-0.0375 * design["sweep_25_deg"])
-        )
-        # Weight and loading
-        design.setdefault("weight_n")
-        design.setdefault("weightfractions", dict())
-        design["weightfractions"].setdefault("climb", 1.0)
-        design["weightfractions"].setdefault("cruise", 1.0)
-        design["weightfractions"].setdefault("servceil", 1.0)
-        design["weightfractions"].setdefault("take-off", 1.0)
-        design["weightfractions"].setdefault("turn", 1.0)
-
-        # ----- CONCEPT PERFORMANCE HANDLING -----
-        # Drag/resistance coefficients
-        performance.setdefault("CD0TO")
-        performance.setdefault("CDTO")
-        performance.setdefault("CDmin", 0.03)
-        performance.setdefault("mu_R", 0.03)
-        # Lift coefficients
-        performance.setdefault("CLTO", 0.95)
-        performance.setdefault("CLmaxTO", 1.5)
-        performance.setdefault("CLmax", 1.1)
-        performance.setdefault("CLminD", 0.2)
-        # Propulsive efficiencies
-        performance.setdefault("eta_prop", dict())
-        performance["eta_prop"].setdefault("climb", 0.75)
-        performance["eta_prop"].setdefault("cruise", 0.85)
-        performance["eta_prop"].setdefault("servceil", 0.65)
-        performance["eta_prop"].setdefault("take-off", 0.45)
-        performance["eta_prop"].setdefault("turn", 0.85)
-
-        return brief, design, performance
 
     def cdi_factor(self, **kwargs):
         """
@@ -500,8 +461,8 @@ class AircraftConcept:
 
         if method == "Cavallo":
             # Find leading edge sweep and wing aspect ratio
-            aspectratio = getattr(self.design, "aspectratio")
-            sweep = np.radians(getattr(self.design, "sweep_le_deg"))
+            aspectratio = self.design.aspectratio
+            sweep = np.radians(self.design.sweep_le_deg)
 
             # Compute Oswald span efficiency estimate
             ARfactor = (1 - 0.045 * aspectratio ** 0.68)
@@ -515,8 +476,8 @@ class AircraftConcept:
         elif method == "Brandt":
             # THIS IS ACTUALLY THE SPAN EFFICIENCY FACTOR!!!
             # Find maximum thickness sweep and wing aspect ratio
-            aspectratio = getattr(self.design, "aspectratio")
-            sweep = np.radians(getattr(self.design, "sweep_mt_deg"))
+            aspectratio = self.design.aspectratio
+            sweep = np.radians(self.design.sweep_mt_deg)
 
             # Compute Oswald span efficiency estimate
             sqrtterm = 4 + aspectratio ** 2 * (1 + (np.tan(sweep)) ** 2)
@@ -526,9 +487,9 @@ class AircraftConcept:
 
         elif method == "Nita-Scholz":
             # Find quarter chord sweep, wing taper ratio, and aspect ratio
-            sweep = getattr(self.design, "sweep_25_deg")
-            taperratio = getattr(self.design, "taperratio")
-            aspectratio = getattr(self.design, "aspectratio")
+            sweep = self.design.sweep_25_deg
+            taperratio = self.design.taperratio
+            aspectratio = self.design.aspectratio
 
             # Calculate Hoerner's delta/AR factor for unswept wings (with NASA's
             # swept wing study, fitted for c=25% sweep)
@@ -567,7 +528,7 @@ class AircraftConcept:
 
         elif method == "Obert":
             # Find the aspect ratio
-            aspectratio = getattr(self.design, "aspectratio")
+            aspectratio = self.design.aspectratio
 
             e0_estimate = 1 / (1.05 + 0.007 * np.pi * aspectratio)
 
@@ -576,8 +537,8 @@ class AircraftConcept:
         elif method == "Kroo":
             # Find the inviscid induced drag factor, aspect ratio, and CDmin
             cdi_inviscid = self.cdi_factor(method="Brandt")
-            aspectratio = getattr(self.design, "aspectratio")
-            CDmin = getattr(self.performance, "CDmin")
+            aspectratio = self.design.aspectratio
+            CDmin = self.performance.CDmin
 
             K = 0.38
             piAR = np.pi * aspectratio
@@ -596,8 +557,8 @@ class AircraftConcept:
 
     def get_LDmax(self, **kwargs):
         # Recast as necessary
-        CDmin = getattr(self.performance, "CDmin")
-        CLmax = getattr(self.performance, "CLmax")
+        CDmin = self.performance.CDmin
+        CLmax = self.performance.CLmax
 
         # Differentiated simple drag model, solve CD0 - k CL^2 = 0.0
         k = self.cdi_factor(method="Nita-Scholz", **kwargs)
@@ -632,8 +593,8 @@ class AircraftConcept:
         altitude_m = actools.recastasnpfloatarray(altitude_m)
         wingloading_pa, altitude_m \
             = np.broadcast_arrays(wingloading_pa, altitude_m)
-        CDmin = getattr(self.performance, "CDmin")
-        weight_n = getattr(self.design, "weight_n")
+        CDmin = self.performance.CDmin
+        weight_n = self.design.weight_n
 
         rho_kgpm3 = self.designatm.airdens_kgpm3(altitude_m)
         vsound_mps = self.designatm.vsound_mps(altitude_m)
@@ -671,8 +632,8 @@ class AircraftConcept:
 
         elif self.propulsion.type in ["turboprop", "piston"]:
 
-            eta_prop = getattr(self.performance, "eta_prop")["climb"]
-            weight_n = getattr(self.design, "weight_n")
+            eta_prop = self.performance.eta_prop["climb"]
+            weight_n = self.design.weight_n
 
             def f_opt(Vx, i):
                 """Helper func: Solve for Vx, for each coefficient index i."""
@@ -724,7 +685,7 @@ class AircraftConcept:
 
         wingloading_pa, altitude_m \
             = np.broadcast_arrays(wingloading_pa, altitude_m)
-        CDmin = getattr(self.performance, "CDmin")
+        CDmin = self.performance.CDmin
 
         rho_kgpm3 = self.designatm.airdens_kgpm3(altitude_m)
         vsound_mps = self.designatm.vsound_mps(altitude_m)
@@ -740,7 +701,7 @@ class AircraftConcept:
                 mach = Vy / vsound_mps.flat[i]
                 thrust_n = self.propulsion.thrust(
                     mach, altitude_m.flat[i], norm=False)
-                weight_n = getattr(self.design, "weight_n")
+                weight_n = self.design.weight_n
                 tw = thrust_n / weight_n
                 LDmax = self.get_LDmax(mach=mach)
                 ldfactor = 1 + (1 + 3 / LDmax ** 2 / tw ** 2) ** 0.5
@@ -800,12 +761,12 @@ class AircraftConcept:
         """
         # Recast as necessary
         wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        climbalt_m = getattr(self.brief, "climbalt_m")
-        climbspeed_kias = getattr(self.brief, "climbspeed_kias")
-        climbrate_fpm = getattr(self.brief, "climbrate_fpm")
-        CDmin = getattr(self.performance, "CDmin")
-        CLmax = getattr(self.performance, "CLmax")
-        CLminD = getattr(self.performance, "CLminD")
+        climbalt_m = self.brief.climbalt_m
+        climbspeed_kias = self.brief.climbspeed_kias
+        climbrate_fpm = self.brief.climbrate_fpm
+        CDmin = self.performance.CDmin
+        CLmax = self.performance.CLmax
+        CLminD = self.performance.CLminD
 
         # Determine the thrust and power lapse corrections
         climbspeed_mpsias = co.kts2mps(climbspeed_kias)
@@ -816,17 +777,17 @@ class AircraftConcept:
         mach = climbspeed_mpstas / self.designatm.vsound_mps(climbalt_m)
         tcorr = self.propulsion.thrust(
             mach=mach, altitude=climbalt_m, norm=True,
-            eta_prop=getattr(self.performance, "eta_prop")["climb"]
+            eta_prop=self.performance.eta_prop["climb"]
         )
         if self.propulsion.type in ["piston", "turboprop"]:
             pcorr = self.propulsion.shaftpower(
                 mach=mach, altitude=climbalt_m, norm=True
-            ) * getattr(self.performance, "eta_prop")["climb"]
+            ) * self.performance.eta_prop["climb"]
         else:
             pcorr = np.nan
 
         # Determine the weight lapse (relative to MTOW) correction
-        wcorr = getattr(self.design, "weightfractions")["climb"]
+        wcorr = self.design.weightfractions["climb"]
 
         # Compute climb constraint
         # ... (upper bounded) wing loading
@@ -887,29 +848,29 @@ class AircraftConcept:
         """
         # Recast as necessary
         wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        cruisealt_m = getattr(self.brief, "cruisealt_m")
-        cruisespeed_ktas = getattr(self.brief, "cruisespeed_ktas")
-        cruisethrustfact = getattr(self.brief, "cruisethrustfact")
-        CDmin = getattr(self.performance, "CDmin")
-        CLmax = getattr(self.performance, "CLmax")
-        CLminD = getattr(self.performance, "CLminD")
+        cruisealt_m = self.brief.cruisealt_m
+        cruisespeed_ktas = self.brief.cruisespeed_ktas
+        cruisethrustfact = self.brief.cruisethrustfact
+        CDmin = self.performance.CDmin
+        CLmax = self.performance.CLmax
+        CLminD = self.performance.CLminD
 
         # Determine the thrust and power lapse corrections
         cruisespeed_mpstas = co.kts2mps(cruisespeed_ktas)
         mach = cruisespeed_mpstas / self.designatm.vsound_mps(cruisealt_m)
         tcorr = cruisethrustfact * self.propulsion.thrust(
             mach=mach, altitude=cruisealt_m, norm=True,
-            eta_prop=getattr(self.performance, "eta_prop")["cruise"]
+            eta_prop=self.performance.eta_prop["cruise"]
         )
         if self.propulsion.type in ["piston", "turboprop"]:
             pcorr = self.propulsion.shaftpower(
                 mach=mach, altitude=cruisealt_m, norm=True
-            ) * getattr(self.performance, "eta_prop")["cruise"]
+            ) * self.performance.eta_prop["cruise"]
         else:
             pcorr = np.nan
 
         # Determine the weight lapse (relative to MTOW) correction
-        wcorr = getattr(self.design, "weightfractions")["cruise"]
+        wcorr = self.design.weightfractions["cruise"]
 
         # Compute cruise constraint
         # ... (upper bounded) wing loading
@@ -958,11 +919,11 @@ class AircraftConcept:
         """
         # Recast as necessary
         wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        servceil_m = getattr(self.brief, "servceil_m")
-        secclimbspd_kias = getattr(self.brief, "secclimbspd_kias")
-        CDmin = getattr(self.performance, "CDmin")
-        CLmax = getattr(self.performance, "CLmax")
-        CLminD = getattr(self.performance, "CLminD")
+        servceil_m = self.brief.servceil_m
+        secclimbspd_kias = self.brief.secclimbspd_kias
+        CDmin = self.performance.CDmin
+        CLmax = self.performance.CLmax
+        CLminD = self.performance.CLminD
 
         # Determine the thrust and power lapse corrections
         secclimbspd_mpsias = co.kts2mps(secclimbspd_kias)
@@ -973,17 +934,17 @@ class AircraftConcept:
         mach = secclimbspd_mpstas / self.designatm.vsound_mps(servceil_m)
         tcorr = self.propulsion.thrust(
             mach=mach, altitude=servceil_m, norm=True,
-            eta_prop=getattr(self.performance, "eta_prop")["servceil"]
+            eta_prop=self.performance.eta_prop["servceil"]
         )
         if self.propulsion.type in ["piston", "turboprop"]:
             pcorr = self.propulsion.shaftpower(
                 mach=mach, altitude=servceil_m, norm=True
-            ) * getattr(self.performance, "eta_prop")["servceil"]
+            ) * self.performance.eta_prop["servceil"]
         else:
             pcorr = np.nan
 
         # Determine the weight lapse (relative to MTOW) correction
-        wcorr = getattr(self.design, "weightfractions")["servceil"]
+        wcorr = self.design.weightfractions["servceil"]
 
         # Compute climb constraint
         # ... (upper bounded) wing loading
@@ -1044,17 +1005,17 @@ class AircraftConcept:
         """
         # Recast as necessary
         wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        groundrun_m = getattr(self.brief, "groundrun_m")
-        rwyelevation_m = getattr(self.brief, "rwyelevation_m")
-        # to_headwind_kts = getattr(self.brief, "to_headwind_kts")
-        # to_slope_perc = getattr(self.brief, "to_slope_perc")
-        CDTO = getattr(self.performance, "CDTO")
-        mu_R = getattr(self.performance, "mu_R")
-        CLTO = getattr(self.performance, "CLTO")
-        CLmaxTO = getattr(self.performance, "CLmaxTO")
+        groundrun_m = self.brief.groundrun_m
+        rwyelevation_m = self.brief.rwyelevation_m
+        # to_headwind_kts = self.brief.to_headwind_kts
+        # to_slope_perc = self.brief.to_slope_perc
+        CDTO = self.performance.CDTO
+        mu_R = self.performance.mu_R
+        CLTO = self.performance.CLTO
+        CLmaxTO = self.performance.CLmaxTO
 
         # Determine the weight lapse (relative to MTOW) correction
-        wcorr = getattr(self.design, "weightfractions")["take-off"]
+        wcorr = self.design.weightfractions["take-off"]
 
         # Approximation for lift-off speed
         ws_pa = wingloading_pa * wcorr
@@ -1070,12 +1031,12 @@ class AircraftConcept:
         # (maybe we should use the altitude=0 sea-level take-off method below?)
         tcorr = self.propulsion.thrust(
             mach=machbar, altitude=rwyelevation_m, norm=True,
-            eta_prop=getattr(self.performance, "eta_prop")["take-off"]
+            eta_prop=self.performance.eta_prop["take-off"]
         )
         if self.propulsion.type in ["piston", "turboprop"]:
             pcorr = self.propulsion.shaftpower(
                 mach=machbar, altitude=rwyelevation_m, norm=True
-            ) * getattr(self.performance, "eta_prop")["take-off"]
+            ) * self.performance.eta_prop["take-off"]
         else:
             pcorr = np.nan
 
@@ -1115,29 +1076,29 @@ class AircraftConcept:
         """
         # Recast as necessary
         wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        stloadfactor = getattr(self.brief, "stloadfactor")
-        turnalt_m = getattr(self.brief, "turnalt_m")
-        turnspeed_ktas = getattr(self.brief, "turnspeed_ktas")
-        CDmin = getattr(self.performance, "CDmin")
-        CLmax = getattr(self.performance, "CLmax")
-        CLminD = getattr(self.performance, "CLminD")
+        stloadfactor = self.brief.stloadfactor
+        turnalt_m = self.brief.turnalt_m
+        turnspeed_ktas = self.brief.turnspeed_ktas
+        CDmin = self.performance.CDmin
+        CLmax = self.performance.CLmax
+        CLminD = self.performance.CLminD
 
         # Determine the thrust and power lapse corrections
         turnspeed_mpstas = co.kts2mps(turnspeed_ktas)
         mach = turnspeed_mpstas / self.designatm.vsound_mps(turnalt_m)
         tcorr = self.propulsion.thrust(
             mach=mach, altitude=turnalt_m, norm=True,
-            eta_prop=getattr(self.performance, "eta_prop")["turn"]
+            eta_prop=self.performance.eta_prop["turn"]
         )
         if self.propulsion.type in ["piston", "turboprop"]:
             pcorr = self.propulsion.shaftpower(
                 mach=mach, altitude=turnalt_m, norm=True
-            ) * getattr(self.performance, "eta_prop")["turn"]
+            ) * self.performance.eta_prop["turn"]
         else:
             pcorr = np.nan
 
         # Determine the weight lapse (relative to MTOW) correction
-        wcorr = getattr(self.design, "weightfractions")["turn"]
+        wcorr = self.design.weightfractions["turn"]
 
         # Compute climb constraint
         # ... (upper bounded) wing loading
@@ -1176,8 +1137,8 @@ class AircraftConcept:
         """
         # (W/S)_max = q_vstall * CLmax
         # Recast as necessary
-        vstallclean_kcas = getattr(self.brief, "vstallclean_kcas")
-        CLmax = getattr(self.performance, "CLmax")
+        vstallclean_kcas = self.brief.vstallclean_kcas
+        CLmax = self.performance.CLmax
         if vstallclean_kcas is None or CLmax is None:
             return np.nan
 
@@ -1202,7 +1163,7 @@ class AircraftConcept:
         """
         # (S)_min = W / (W/S)_max
         # Recast as necessary
-        weight_n = getattr(self.design, "weight_n")
+        weight_n = self.design.weight_n
         s_m2 = weight_n / self.cleanstall_WSmax
         return s_m2
 
@@ -1244,7 +1205,7 @@ class AircraftConcept:
                 pass
 
         # Choose between S and W/S, depending on if the MTOW is known
-        weight_n = getattr(self.design, "weight_n")
+        weight_n = self.design.weight_n
 
         if weight_n:
             xs = weight_n / wingloading_pa

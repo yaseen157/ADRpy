@@ -1,16 +1,8 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
-.. _airworthiness_module:
-
-Airworthiness module
---------------------
-
-This module contains tools for the analysis of an aircraft design from the
+This module contains tools for the analysis of an aircraft concept, from the
 point of view of meeting initial airworthiness requirements.
-
 """
+
 
 __author__ = "Yaseen Reza"
 
@@ -26,6 +18,15 @@ from ADRpy import constraintanalysis as ca
 from ADRpy import unitconversions as co
 from ADRpy import mtools4acdc as actools
 
+class AircraftCertification:
+    """
+    A class to support the analysis of aircraft concepts, with respect to an
+    initial assessment of their airworthiness.
+    """
+
+    def __init__(self, concept: ca.AircraftConcept, *, spec=None):
+        self.concept = concept
+        return
 
 class CertificationSpecifications:
     """Aircraft concept class designed for capturing those elements of the definition

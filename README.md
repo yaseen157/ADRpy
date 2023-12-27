@@ -45,13 +45,13 @@ of this page.
 Components of this library are written to be both easy to read and modify 
 without requiring significant coding knowledge. Confident coders looking for a
 more flexible and expandable library architecture may wish to check out ADRpy's
-companion library [CARPy](https://github.com/yaseen157/carpy/tree/main).
+companion library [CARPy](https://github.com/yaseen157/carpy/tree/main) (currently a work in progress!).
 
 ---
 
 ## Installation
 
-ADRpy is written in Python 3 and tested in Python versions 3.5 up to 3.9.
+ADRpy is written in Python 3 and tested in Python version 3.9.
 
 *It is not available for Python 2.*
 
@@ -106,7 +106,7 @@ print("ISA+10C density at 41,000 feet (geopotential):",
 
 You should see the following output:
 
-    ISA+10C density at 41,000 feet (geopotential): 0.274725888531 kg/m^3
+    ISA+10C density at 41,000 feet (geopotential): 0.27472588853063956 kg/m^3
 
 A design example: wing/powerplant sizing for take-off
 -----------------------------------------------------
@@ -136,8 +136,8 @@ m310_ht5 = at.Atmosphere(profile=profile_ht5_1percentile)
 designbrief = {'rwyelevation_m':1000, 'groundrun_m':1200}
 
 # Basic features of the concept:
-# aspect ratio, engine bypass ratio, throttle ratio 
-designdefinition = {'aspectratio':7.3, 'bpr':3.9, 'tr':1.05}
+# aspect ratio, throttle ratio 
+designdefinition = {'aspectratio':7.3, 'tr':1.05}
 
 # Initial estimates of aerodynamic performance:
 designperf = {'CDTO':0.04, 'CLTO':0.9, 'CLmaxTO':1.6,
@@ -145,7 +145,7 @@ designperf = {'CDTO':0.04, 'CLTO':0.9, 'CLmaxTO':1.6,
 
 # An aircraft concept object can now be instantiated
 concept = ca.AircraftConcept(designbrief, designdefinition,
-                             designperf, m310_ht5)
+                             designperf, m310_ht5, "Piston")
 
 #====================================================================
 
@@ -153,26 +153,17 @@ concept = ca.AircraftConcept(designbrief, designdefinition,
 # for the target take-off performance at a range of wing loadings:
 wingloadinglist_pa = [2000, 3000, 4000, 5000]
 
-tw_sl, liftoffspeed_mpstas, _ = concept.twrequired_to(wingloadinglist_pa)
+tw_sl, _ = concept.constrain_takeoff(wingloadinglist_pa)
 
-# The take-off constraint calculation also supplies an estimate of
-# the lift-off speed; this is TAS (assuming zero wind) - we convert 
-# it to equivalent airspeed (EAS), in m/s:
-liftoffspeed_mpseas = \
-m310_ht5.tas2eas(liftoffspeed_mpstas, designbrief['rwyelevation_m'])
-
-print("Required T/W and V_liftoff under MIL-HDBK-310 conditions:")
-print("\nT/W (std. day, SL, static thrust):", tw_sl)
-print("\nLiftoff speed (KEAS):", co.mps2kts(liftoffspeed_mpseas))
+print("Required T/W under MIL-HDBK-310 conditions:")
+print("\nT/W (SL, static thrust):", tw_sl)
 ```
 
 You should see the following output:
 
-    Required T/W and V_liftoff under MIL-HDBK-310 conditions:
+    Required T/W under MIL-HDBK-310 conditions:
 
-    T/W (std. day, SL, static thrust): [ 0.19618164  0.2710746   0.34472518  0.41715311]
-
-    Liftoff speed (KEAS): [  96.99203483  118.79049722  137.1674511   153.35787248]
+    T/W (SL, static thrust): [0.32348606 0.44523742 0.56698878 0.68874015]
 
 ---
 ## More extensive examples - a library of notebooks
