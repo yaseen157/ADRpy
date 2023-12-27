@@ -189,15 +189,6 @@ class AircraftConcept:
                     IAS/CAS/EAS, use `eas2tas <https://adrpy.readthedocs.io/en/latest/#atmospheres.Atmosphere.eas2tas>`_
                     first to obtain the TAS value.
 
-                Example design brief::
-
-                    brief = {'rwyelevation_m':0, 'groundrun_m':313,
-                             'stloadfactor': 1.5, 'turnalt_m': 1000, 'turnspeed_ktas': 100,
-                             'climbalt_m': 0, 'climbspeed_kias': 101, 'climbrate_fpm': 1398,
-                             'cruisealt_m': 3048, 'cruisespeed_ktas': 182, 'cruisethrustfact': 1.0,
-                             'servceil_m': 6580, 'secclimbspd_kias': 92,
-                             'vstallclean_kcas': 69}
-
             design: Definition of key, high level design variables that define
                 the future design.
 
@@ -274,10 +265,8 @@ class AircraftConcept:
                 eta_prop
                     Dictionary. Propeller efficiency in various phases of the
                     mission. It should contain the following keys: *take-off*,
-                    *climb*, *cruise*, *turn*, *servceil*. Optional, unspecified
-                    entries in the dictionary default to the following values:
-
-                    :code: `etap = {'take-off': 0.45, 'climb': 0.75, 'cruise': 0.85, 'turn': 0.85, 'servceil': 0.65}`
+                    *climb*, *cruise*, *turn*, *servceil*. Optional, efficiency
+                    defaults to 0.45, 0.75, 0.85, 0.85, and 0.65, respectively.
 
             atmosphere: `Atmosphere <https://adrpy.readthedocs.io/en/latest/#atmospheres.Atmosphere>`_
                 class object. Specifies the virtual atmosphere in which all the
@@ -295,11 +284,9 @@ class AircraftConcept:
 
         """
         # Parse the input arguments
-        brief = dict() if brief is None else brief
-        design = dict() if design is None else design
-        performance = dict() if performance is None else performance
-        atmosphere = at.Atmosphere() if atmosphere is None else atmosphere
-        # propulsion comes later, it's complicated
+        for variable in ["brief", "design", "performance"]:
+            if eval(f"{variable} is None"):
+                exec(f"{variable} = dict()")  # Set to empty dict if necessary
 
         # ----- DESIGN BRIEF HANDLING -----
         # Climb constraint
@@ -330,8 +317,8 @@ class AircraftConcept:
         design.setdefault("sweep_mt_deg", design["sweep_le_deg"])
         design.setdefault(
             "sweep_25_deg",
-            (2 / 7) * design["sweep_le_deg"]
-            + (5 / 7) * design["sweep_mt_deg"]
+            (2 / 7) * design["sweep_le_deg"] + (5 / 7) * design[
+                "sweep_mt_deg"]
         )
         design.setdefault(
             "taperratio",
@@ -388,9 +375,87 @@ class AircraftConcept:
         self.designatm = atmosphere
         self.propulsion = propulsion
 
-
-
         return
+    @staticmethod
+    def _default_design():
+        """
+        Set the default parameters for the design brief, the design definition,
+        and the design performance dictionaries.
+
+        Returns:
+            Tuple of default design dictionaries (brief, design, performance).
+
+        """
+        brief = dict()
+        design = dict()
+        performance = dict()
+
+        # ----- DESIGN BRIEF HANDLING -----
+        # Climb constraint
+        brief.setdefault("climbalt_m", 0.0)
+        brief.setdefault("climbspeed_kias")
+        brief.setdefault("climbrate_fpm")
+        # Cruise constraint
+        brief.setdefault("cruisealt_m")
+        brief.setdefault("cruisespeed_ktas")
+        brief.setdefault("cruisethrustfact", 1.0)
+        # Service ceiling constraint
+        brief.setdefault("servceil_m")
+        brief.setdefault("secclimbspd_kias")
+        # Stall constraint
+        brief.setdefault("vstallclean_kcas")
+        # Take-off constraint
+        brief.setdefault("groundrun_m")
+        brief.setdefault("rwyelevation_m", 0.0)
+        # Sustained turn constraint
+        brief.setdefault("stloadfactor")
+        brief.setdefault("turnalt_m", 0.0)
+        brief.setdefault("turnspeed_ktas")
+
+        # ----- CONCEPT DESIGN HANDLING -----
+        # Geometry definitions
+        design.setdefault("aspectratio", 8.0)
+        design.setdefault("sweep_le_deg", 0.0)
+        design.setdefault("sweep_mt_deg", design["sweep_le_deg"])
+        design.setdefault(
+            "sweep_25_deg",
+            (2 / 7) * design["sweep_le_deg"] + (5 / 7) * design["sweep_mt_deg"]
+        )
+        design.setdefault(
+            "taperratio",
+            # Optimal root taper ratio (if one is not provided)
+            # https://www.fzt.haw-hamburg.de/pers/Scholz/OPerA/OPerA_PRE_DLRK_12-09-10_MethodOnly.pdf
+            0.45 * np.exp(-0.0375 * design["sweep_25_deg"])
+        )
+        # Weight and loading
+        design.setdefault("weight_n")
+        design.setdefault("weightfractions", dict())
+        design["weightfractions"].setdefault("climb", 1.0)
+        design["weightfractions"].setdefault("cruise", 1.0)
+        design["weightfractions"].setdefault("servceil", 1.0)
+        design["weightfractions"].setdefault("take-off", 1.0)
+        design["weightfractions"].setdefault("turn", 1.0)
+
+        # ----- CONCEPT PERFORMANCE HANDLING -----
+        # Drag/resistance coefficients
+        performance.setdefault("CD0TO")
+        performance.setdefault("CDTO")
+        performance.setdefault("CDmin", 0.03)
+        performance.setdefault("mu_R", 0.03)
+        # Lift coefficients
+        performance.setdefault("CLTO", 0.95)
+        performance.setdefault("CLmaxTO", 1.5)
+        performance.setdefault("CLmax", 1.1)
+        performance.setdefault("CLminD", 0.2)
+        # Propulsive efficiencies
+        performance.setdefault("eta_prop", dict())
+        performance["eta_prop"].setdefault("climb", 0.75)
+        performance["eta_prop"].setdefault("cruise", 0.85)
+        performance["eta_prop"].setdefault("servceil", 0.65)
+        performance["eta_prop"].setdefault("take-off", 0.45)
+        performance["eta_prop"].setdefault("turn", 0.85)
+
+        return brief, design, performance
 
     def cdi_factor(self, **kwargs):
         """
@@ -999,8 +1064,10 @@ class AircraftConcept:
         vliftoff_mps = vrotate_mps
 
         # Determine the thrust and power lapse corrections
-        vbar_mpstas = 0.75 * vliftoff_mps  # Repr. speed from CoM of integral
+        # (use a representative speed from centre of mass of the integral)
+        vbar_mpstas = 0.75 * vliftoff_mps
         machbar = vbar_mpstas / self.designatm.vsound_mps(rwyelevation_m)
+        # (maybe we should use the altitude=0 sea-level take-off method below?)
         tcorr = self.propulsion.thrust(
             mach=machbar, altitude=rwyelevation_m, norm=True,
             eta_prop=getattr(self.performance, "eta_prop")["take-off"]
