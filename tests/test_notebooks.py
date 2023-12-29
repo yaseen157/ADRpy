@@ -3,7 +3,9 @@ import os
 import unittest
 
 import nbformat
-from nbconvert.preprocessors import ExecutePreprocessor, CellExecutionError
+from nbclient import NotebookClient
+from nbclient.exceptions import CellExecutionError
+
 
 class RunNotebooks(unittest.TestCase):
 
@@ -38,33 +40,34 @@ class RunNotebooks(unittest.TestCase):
         # Run every notebook
         failed2open = []
         failed2run = []
-        for filename, src_path in notebooks_paths.items():
+        for filename, filepath in notebooks_paths.items():
 
             # Load the notebook
             try:
-                with open(src_path) as f:
-                    nb = nbformat.read(f, as_version=4)
+                nb = nbformat.read(filepath, as_version=4)
             except UnicodeDecodeError:
                 failed2open.append(filename)
                 continue
 
             # Configure a notebook executor
             try:
-                ep = ExecutePreprocessor(timeout=60, kernel_name='python3')
+                client = NotebookClient(
+                    nb, timeout=60, kernel_name='python3',
+                    resources={'metadata': {'path': notebooks_src}}
+                )
             except Exception as e:
                 raise Exception("Check advice in this test's notes?") from e
 
             try:
                 # Run the notebook
-                out = ep.preprocess(nb, {'metadata': {'path': notebooks_src}})
+                client.execute()
             except CellExecutionError:
                 # If we have allowed errors, prepare report to the developer
                 out = None
                 failed2run.append(filename)
             finally:
                 # Save the notebook (and any tracebacks)
-                with open(src_path, mode='w', encoding='utf-8') as f:
-                    nbformat.write(nb, f)
+                nbformat.write(nb, filepath)
 
         # Pretty printing for unittest runner
         if failed2open or failed2run:
@@ -77,6 +80,7 @@ class RunNotebooks(unittest.TestCase):
                   f"\n\t> " + "\n\t> ".join(failed2run))
             print(f"Saved tracebacks in '{notebooks_src}'")
             self.fail(f"One or more notebooks failed to run")
+        print("\n!!! Make sure to check figures have rendered properly !!!\n")
 
         return
 
