@@ -2,7 +2,7 @@
 This module contains tools for the constraint analysis of fixed wing aircraft.
 """
 import typing
-import warnings
+# import warnings
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -87,7 +87,7 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
             CD = np.where(CL <= CLm, CDquad, CDmod)
 
             if (CL > _CLmax).any():
-                warnmsg = f"Coefficient of lift exceeded CLmax={_CLmax}"
+                # warnmsg = f"Coefficient of lift exceeded CLmax={_CLmax}"
                 # warnings.warn(warnmsg, category=RuntimeWarning)
                 CD[CL > _CLmax] = np.nan
 
@@ -591,7 +591,8 @@ class AircraftConcept:
 
         return cdi_factor
 
-    def get_LDmax(self, **kwargs):
+    def _get_LDmax(self, **kwargs):
+        """Experimental method for getting the maximum lift to drag ratio."""
         # Recast as necessary
         CDmin = self.performance.CDmin
         CLmax = self.performance.CLmax
@@ -600,8 +601,8 @@ class AircraftConcept:
         k = self.cdi_factor(method="Nita-Scholz", **kwargs)
         CL = (CDmin / k) ** 0.5
         if CL > CLmax:
-            warnmsg = f"Couldn't achieve (L/D)max, needed {CL=} ({CLmax=})"
-            warnings.warn(warnmsg, RuntimeWarning)
+            # warnmsg = f"Couldn't achieve (L/D)max, needed {CL=} ({CLmax=})"
+            # warnings.warn(warnmsg, RuntimeWarning)
             CL = np.clip(CL, None, CLmax)
 
         LDmax = CL / (CDmin + k * CL ** 2)
@@ -648,7 +649,7 @@ class AircraftConcept:
                 thrust = self.propulsion.thrust(
                     mach, altitude_m.flat[i], norm=False
                 )
-                LDmax = self.get_LDmax(mach=mach)
+                LDmax = self._get_LDmax(mach=mach)
                 theta_max = np.arcsin(np.clip(
                     thrust / weight_n - 1 / LDmax,
                     None, 1  # Limit theta_max to 90 degrees climb angle
@@ -739,7 +740,7 @@ class AircraftConcept:
                     mach, altitude_m.flat[i], norm=False)
                 weight_n = self.design.weight_n
                 tw = thrust_n / weight_n
-                LDmax = self.get_LDmax(mach=mach)
+                LDmax = self._get_LDmax(mach=mach)
                 ldfactor = 1 + (1 + 3 / LDmax ** 2 / tw ** 2) ** 0.5
                 bestspeed_guess_mps = (tw * wsfactor.flat[i] * ldfactor) ** 0.5
 
@@ -832,7 +833,7 @@ class AircraftConcept:
         ws_pa = wingloading_pa * wcorr
         wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
-            warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
+            # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
@@ -915,7 +916,7 @@ class AircraftConcept:
         ws_pa = wingloading_pa * wcorr
         wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
-            warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
+            # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
@@ -989,7 +990,7 @@ class AircraftConcept:
         ws_pa = wingloading_pa * wcorr
         wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
-            warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
+            # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
@@ -1143,7 +1144,7 @@ class AircraftConcept:
         ws_pa = wingloading_pa * wcorr
         wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
-            warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
+            # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
@@ -1265,9 +1266,7 @@ class AircraftConcept:
         ymed = np.nanmax(np.nanmedian(np.array(list(ys.values())), axis=1))
         ylim = ymed / 0.45  # Median of constraints is the bot. 45 % of the fig.
         if np.isnan(ylim):
-            errormsg = (
-                f"{self.plot_constraints.__name__} found no values"
-            )
+            errormsg = f"{self.plot_constraints.__name__} found no values"
             raise RuntimeError(errormsg)
 
         fig, ax = plt.subplots(dpi=140, figsize=(7, 4))

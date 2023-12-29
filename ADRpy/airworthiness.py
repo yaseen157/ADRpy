@@ -12,18 +12,37 @@ from matplotlib import pyplot as plt
 from scipy import constants, optimize as sopt
 
 from ADRpy import constraintanalysis as ca
-from ADRpy import unitconversions as co
+# Don't believe PyCharm 2023's lies, we are v. much using ADRpy.unitconversions!
+from ADRpy import unitconversions as co  # <-- KEEP THIS
 from ADRpy import mtools4acdc as actools
 
 __author__ = "Yaseen Reza"
 
 
 class CS23Amendment4:
+    """
+    A class for evaluating the conformity of an aircraft concept to the EASA
+    Airworthiness Certification and Regulation rules for Part 23 aircraft.
+    Methods contained within are built on EASA CS-23 (Amendment 4),
+    specifications for "Normal", "Utility", "Aerobatic", and "Commuter"
+    aeroplanes.
+
+    Presently, the class' main attraction is supporting the construction of
+    V-n diagrams for aircraft concepts using the rules.
+
+    """
 
     def __init__(self,
                  concept: ca.AircraftConcept,
                  categories: typing.Union[list[str], str],
                  wingarea_m2: float):
+        """
+        Args:
+            concept: Aircraft concept, as per the constraintsanalysis module.
+            categories: A string, or list of strings describing desired CS-23
+                certification categories.
+            wingarea_m2: The concept's wing area, in metres squared.
+        """
 
         self.concept = concept
 
@@ -89,6 +108,9 @@ class CS23Amendment4:
 
         # Refactoring
         CLmax = self.concept.performance.CLmax
+        CLmaxHL = np.nan
+        if hasattr(self.concept.performance, "CLmaxHL"):
+            CLmaxHL = self.concept.performance.CLmaxHL
         CLmin = self.concept.performance.CLmin
         designatm = self.concept.designatm
         funcs_ngminus1 = self.paragraph341_c_ngminus1
@@ -96,7 +118,8 @@ class CS23Amendment4:
 
         for i in range(altitude_m.size):
             alt_m = altitude_m.flat[i]
-            ws_pa = weightfraction.flat[i] * wslim_pa  # Current loading frac.
+            wfrac = weightfraction.flat[i]
+            ws_pa = wfrac * wslim_pa  # Current loading frac.
 
             # Compute rho - even though CS23 requires ISA, we allow other atms.
             rho = designatm.airdens_kgpm3(altitude_m=alt_m)
@@ -107,20 +130,22 @@ class CS23Amendment4:
                 mpstas = co.kts2mps(speed_kts=ktas)
                 return mpstas
 
-            def mpstas2keas(mpstas):
-                """Convert m/s TAS to knots EAS."""
-                ktas = co.mps2kts(speed_mps=mpstas)
-                keas = designatm.tas2eas(tas=ktas, altitude_m=alt_m)
-                return keas
-
-            # Stall (and inverted stall) speed
-            VS = mpstas2keas((2 * ws_pa / rho / CLmax) ** 0.5)
-            VSi = mpstas2keas((2 * ws_pa / rho / abs(CLmin)) ** 0.5)
+            # def mpstas2keas(mpstas):
+            #     """Convert m/s TAS to knots EAS."""
+            #     ktas = co.mps2kts(speed_mps=mpstas)
+            #     keas = designatm.tas2eas(tas=ktas, altitude_m=alt_m)
+            #     return keas
 
             def f_npos(keas):
                 """Compute positively loaded stall curve."""
                 V = keas2mpstas(keas)
                 npos = 0.5 * rho * V ** 2 * CLmax / ws_pa
+                return npos
+
+            def f_npos_flap(keas):
+                """Compute positively loaded stall curve, with full flaps."""
+                V = keas2mpstas(keas)
+                npos = 0.5 * rho * V ** 2 * CLmaxHL / ws_pa
                 return npos
 
             def f_nneg(keas):
@@ -135,8 +160,12 @@ class CS23Amendment4:
                 # Equivalent Airspeeds (initial guesses based on minimums)
                 VC = self.paragraph335_a_VCmin[category]
                 VD = self.paragraph335_b_VDmin[category]
-                VAmano = self.paragraph335_c_VAmin[category]
-                VGmano = self.paragraph335_c_VGmin[category]
+                VAmano = self.paragraph335_c_VAmin[category](wfrac)
+                VGmano = self.paragraph335_c_VGmin[category](wfrac)
+                VF = self.paragraph345_b_VFmin(wfrac)
+                # Stall (and inverted stall) speed
+                VS = self.paragraph49_b_VS1 * (wfrac ** 0.5)
+                VSi = VS * (CLmax / abs(CLmin)) ** 0.5
 
                 # Find VA gust point (where stall curve meets the VC gust line)
                 def f_opt(V, condition, npos=True):
@@ -150,15 +179,26 @@ class CS23Amendment4:
                         ng = 1 - ng_m1
                     return n - ng
 
-                VAgust = sopt.newton(f_opt, VAmano, args=("C", True))
-                VA = max(VAmano, VAgust)
+                try:
+                    VAgust = sopt.newton(f_opt, VAmano, args=("C", True))
+                except RuntimeError:
+                    VAgust = np.nan
+                VA = np.nanmax((VAmano, VAgust))
+                # CS 23.335 Design airspeeds. Sub-paragraph (c). Item (2):
+                VA = min(VA, VC)  # VA need not exceed VC
 
                 # Find VB gust point (where stall curve meets the VB gust line)
-                VB = np.nan
+
                 if category == "commuter":
-                    VB = sopt.newton(f_opt, VAmano, args=("B", True))
+                    try:
+                        VB = sopt.newton(f_opt, VAmano, args=("B", True))
+                    except RuntimeError:
+                        VB = np.nan
+                else:
+                    VB = np.nan
                 # CS 23.335 Design airspeeds. Sub-paragraph (d). Item (2):
-                VB = min(VB, VC)  # VB shouldn't need to exceed VC
+                VB = min(VB, VC)  # VB need not exceed VC
+                # Using the built-in min() preserves the np.nan, if it is there
 
                 # Find VG gust point (inverted stall version of VA)
                 # Intersection point isn't guaranteed, like VA or VB is!
@@ -167,12 +207,16 @@ class CS23Amendment4:
                 except RuntimeError:
                     VGgust = np.nan
                 VG = np.nanmax((VGmano, VGgust))
+                # CS 23.335 Design airspeeds. Sub-paragraph (c). Item (2):
+                # Technically this was for VA, but I think it applies anyway
+                VG = min(VG, VC)  # VG need not exceed VC
 
                 class Speeds:
                     """V-n diagram speeds. Unless specified, units of KEAS."""
                     xs = np.linspace(0, VD, num=N)
                     A, B, C, D = VA, VB, VC, VD
-                    E, F, G = VD, VC, VG
+                    F = VF
+                    G = VG
                     S, Si = VS, VSi
 
                 # ------------------------------------------------------------ #
@@ -182,19 +226,16 @@ class CS23Amendment4:
                 nAmano = f_npos(keas=VA)
                 nGmano = f_nneg(keas=VG)
                 nEmano = 0 if category in ["normal", "commuter"] else -1
+                nFmano = self.paragraph345_a_nF
 
                 class ManoeuvreLoads:
-                    """V-n diagram manoeuvre loads."""
-                    A, B, C, D = (nAmano,) * 4
-                    E = nEmano
-                    F, G = (nGmano,) * 2
-                    S = f_npos(VS)
-                    Si = f_nneg(VSi)
+                    """V-n diagram manoeuvre load curves."""
                     S_A = f_npos(keas=Speeds.xs)
                     A_D = nAmano * np.ones(Speeds.xs.shape)
                     Si_G = f_nneg(keas=Speeds.xs)
                     G_F = nGmano * np.ones(Speeds.xs.shape)
                     F_E = np.interp(Speeds.xs, [VC, VD], [nGmano, nEmano])
+                    flaps = np.clip(f_npos_flap(keas=Speeds.xs), None, nFmano)
 
                 # ... gusting
                 nCgust_m1 = funcs_ngminus1[category]["C"](VC, ws_pa, alt_m)
@@ -230,10 +271,12 @@ class CS23Amendment4:
 
         return altitude_m, weightfraction, output_Vndata
 
-    def _parse_Vn_data(self, Vndata):
+    @staticmethod
+    def _parse_Vn_data(Vndata):
         """
         Given some computed V-n data objects from the _make_Vn_data() method,
-        extract coordinates for the V-n diagram.
+        extract coordinates for the V-n diagram's manoeuvre limit, and combined
+        manoeuvre and gust limit envelope.
 
         Args:
             Vndata: A V-n data object, as per the ones found in
@@ -256,8 +299,8 @@ class CS23Amendment4:
         # Create masks for the lower half of the V-n diagram
         mask_O_Si = (0.0 <= Vndata.V.xs) & (Vndata.V.xs < Vndata.V.Si)
         mask_Si_G = (Vndata.V.Si <= Vndata.V.xs) & (Vndata.V.xs < Vndata.V.G)
-        mask_G_F = (Vndata.V.G <= Vndata.V.xs) & (Vndata.V.xs < Vndata.V.F)
-        mask_F_E = (Vndata.V.F <= Vndata.V.xs) & (Vndata.V.xs <= Vndata.V.E)
+        mask_G_F = (Vndata.V.G <= Vndata.V.xs) & (Vndata.V.xs < Vndata.V.C)
+        mask_F_E = (Vndata.V.C <= Vndata.V.xs) & (Vndata.V.xs <= Vndata.V.D)
 
         # Extract manoeuvre ONLY data using masks
         ys_u_mano = np.hstack((
@@ -323,6 +366,26 @@ class CS23Amendment4:
         return xs, ys_combined, ys_manoeuvre
 
     def plot_Vn(self, altitude_m=None, weightfraction=None, N=None):
+        """
+        Make a pretty figure with the limit manoeuvre and the limit gust
+        envelopes.
+
+        Args:
+            altitude_m: Altitudes at which to consider the V-n diagram.
+            weightfraction: Weight fractions at which to consider calculations.
+            N: The number of coordinates to discretise the velocity axis of the
+                V-n diagram.
+
+        Returns:
+            A tuple of the matplotlib (Figure, Axes) objects used to plot all
+            the data.
+
+        Notes:
+            The "w/ flaps 100%" limit envelope is based on the manoeuvre limit
+            rules, and does not include the EASA CS-23 regulatory rules for how
+            the envelope should account for +/- 25 feet per second gusts.
+
+        """
         # Recast as necessary
         altitude_m = 0 if altitude_m is None else altitude_m
         weightfraction = 1.0 if weightfraction is None else weightfraction
@@ -338,7 +401,7 @@ class CS23Amendment4:
             # Choose correct altitude/weightfraction (loading) case to consider
             Vncases.append([x[i] for x in data.values()])
         else:
-            # Recast
+            # Recast into an array where dimension 0 spans each cert. category
             Vn_by_category = np.array(list(zip(*Vncases)))
 
         # Plotting time!
@@ -350,25 +413,37 @@ class CS23Amendment4:
         ax.set_title(axtitle, fontsize="small")
 
         # ... manoeuvre and combined plots
-        for Vncase in Vn_by_category:
-            # Map x and y coordinates
-            xdata, ydata, ydata_mano = zip(*map(self._parse_Vn_data, Vncase))
+        # for each dataset belonging to a specific certification category
+        for cat_data in Vn_by_category:
+            # Map x and y coordinates of limit manoeuvre and gust envelopes
+            # Each dimension zero should be a different altitude/weightfraction
+            xdata, ydata, ydata_mano = zip(*map(self._parse_Vn_data, cat_data))
             xdata = np.array(xdata)
             ydata = np.vstack(ydata)
             ydata_mano = np.vstack(ydata_mano)
+            # Warning: ydata_flap has N data points, not 2 * N like the others!
+            ydata_flap = np.array(list(map(lambda x: x.n.flaps, cat_data)))
 
             for i, wfrac in enumerate(weightfraction.flat):
                 # The coordinate arrays are missing stall lines. Let's fix it
                 not_nan = ~np.isnan(ydata[i])
-                xdatai = xdata[i][not_nan]
+                xdatai = xdata[i][not_nan]  # <-- Only for manoeuvre and gust!!!
                 ydatai, ydatai_mano = ydata[i][not_nan], ydata_mano[i][not_nan]
                 xdatai = np.hstack((xdatai[0], xdatai, xdatai[-1]))
                 ydatai = np.hstack((0, ydatai, 0))
                 ydatai_mano = np.hstack((0, ydatai_mano, 0))
+                # The same, but flaps have a different stall condition
+                not_stalled = ydata_flap[i] >= 1
+                xdatai_flap = xdata[i][:N][not_stalled]  # See above, not 2 * N
+                ydatai_flap = ydata_flap[i][not_stalled]
+                # Now plot
                 ax.fill(xdatai, ydatai_mano, c="paleturquoise", zorder=-5,
-                        label="Manoeuvre Envelope")
+                        label="Manoeuvre\n Envelope")
                 ax.fill(xdatai, ydatai, c="thistle", zorder=-10,
-                        label="+Gust")
+                        label="w/ Gust Limits")
+                if not_stalled.any():
+                    ax.fill_between(xdatai_flap, ydatai_flap, fc="lightgreen",
+                                    zorder=-15, label="w/ Flaps 100%")
 
         # ... gust lines
         gustcases = [x for sublist in data.values() for x in sublist]
@@ -399,9 +474,10 @@ class CS23Amendment4:
         # ... annoyingly, this works locally and not in jupyter notebooks (???)
         # ax.set_xticks(ax.get_xticks(), [""] + ax.get_xticklabels()[1:])
 
-        # need to squash legend
+        # need to squash legend duplicates
         ax.legend()
         handles, labels = ax.get_legend_handles_labels()
+        labels, handles = zip(*dict(zip(labels, handles)).items())  # squash!
         # ph = [plt.plot([], marker="", ls="")[0]]  # Canvas
         # handles, labels = ph + handles, ["Envelope type:"] + labels
         ax.legend(handles=handles, labels=labels, ncol=len(handles),
@@ -488,6 +564,53 @@ class CS23Amendment4:
         return False
 
     @property
+    def paragraph49_b_VS1(self) -> float:
+        """
+        CS 23.49 Stalling speed.
+        Sub-paragraph (b).
+
+        Returns:
+            Aircraft MTOW clean-configuration stalling speed, in knots CAS.
+
+        """
+        # Clean, level flight stall speed VS from flight tests (use the brief)
+        if hasattr(self.concept.brief, "vstallclean_kcas"):
+            VS = self.concept.brief.vstallclean_kcas
+        else:
+            raise ValueError("'vstallclean_kcas' was not set!")
+
+        return VS
+
+    @property
+    def paragraph49_b_VS0(self) -> float:
+        """
+        CS 23.49 Stalling speed.
+        Sub-paragraph (b).
+
+        Returns:
+            Aircraft MTOW landing-configuration stalling speed, in knots CAS.
+
+        """
+        # 0.5 * rho * VS0^2 * S_HL * CLmaxHL == 0.5 * rho * VS1^2 * S * CLmax
+        # --> VS0^2 * S_HL * CLmaxHL == VS1^2 * S * CLmax
+        # --> VS0^2 == VS1^2 * (S / S_HL) * (CLmax / CLmaxHL)
+
+        if not hasattr(self.concept.performance, "CLmax"):
+            return np.nan
+        CLmax = self.concept.performance.CLmax
+
+        if not hasattr(self.concept.performance, "CLmaxHL"):
+            return np.nan
+        CLmaxHL = self.concept.performance.CLmaxHL
+
+        # Assume that ratio of wing area to high-lift wing area (S / S_HL) is 1
+        # for CS-23 aircraft --> (S / S_HL) == 1.0
+        VS1 = self.paragraph49_b_VS1
+        VS0 = (VS1 ** 2 * 1.0 * (CLmax / CLmaxHL)) ** 0.5
+
+        return VS0
+
+    @property
     def paragraph333_c_Ude(self) -> dict[str, dict[str, typing.Callable]]:
         """
         CS 23.333 Flight envelope.
@@ -524,6 +647,9 @@ class CS23Amendment4:
 
         Returns:
             Minimum design cruising speed, VCmin, in knots EAS.
+
+        Notes:
+            The limit is computed, per instruction, to depend on MTOW.
 
         """
         output = self._new_categories_dict()
@@ -579,6 +705,9 @@ class CS23Amendment4:
         Returns:
             Minimum design dive speed, VDmin, in knots EAS.
 
+        Notes:
+            The limit is computed, per instruction, to depend on MTOW.
+
         """
         output = self._new_categories_dict()
 
@@ -598,42 +727,68 @@ class CS23Amendment4:
         return output
 
     @property
-    def paragraph335_c_VAmin(self) -> dict[str, float]:
+    def paragraph335_c_VAmin(self) -> dict[str, typing.Callable]:
         """
         CS 23.335 Design airspeeds.
         Sub-paragraph (c).
 
         Returns:
-            Minimum design manoeuvring speed, VAmin, in knots EAS.
+            Function for minimum design manoeuvring speed, VAmin, in knots EAS.
+            Accepts an optional argument 'weightfraction', defaults to 1.0.
 
         """
+        # warnmsg = f"No method exists for kcas -> keas, assuming CAS ~ EAS"
+        # warnings.warn(warnmsg, RuntimeWarning)
         # Item (1)
         n1 = self.paragraph337_a_n1
-        VS = self.concept.brief.vstallclean_kcas
-        output = {category: VS * n ** 0.5 for (category, n) in n1.items()}
+        VS = self.paragraph49_b_VS1
+
+        def get_VAmin(n, weightfraction=None):
+            """Given manoeuvre load factor (and weight fraction), get VAmin."""
+            weightfraction = 1.0 if weightfraction is None else weightfraction
+            VAmin = VS * (n / weightfraction) ** 0.5
+            return VAmin
+
+        output = {
+            category: partial(get_VAmin, n)
+            for (category, n) in n1.items()
+        }
 
         return output
 
     @property
-    def paragraph335_c_VGmin(self) -> dict[str, float]:
+    def paragraph335_c_VGmin(self) -> dict[str, typing.Callable]:
         """
         CS 23.335 Design airspeeds.
         Sub-paragraph (c).
 
         Returns:
-            Minimum design inverted manoeuvring speed, VGmin, in knots EAS.
+            Function for minimum design inverted manoeuvring speed, VGmin, in
+            knots EAS. Accepts an optional argument 'weightfraction', defaults
+            to 1.0.
 
         """
+        # warnmsg = f"No method exists for kcas -> keas, assuming CAS ~ EAS"
+        # warnings.warn(warnmsg, RuntimeWarning)
         # (W/S) = 0.5 * rho * V^2 * CL
         # ==> 2 * (W/S) / rho = V^2 * CL
-        VS = self.concept.brief.vstallclean_kcas
+        VS = self.paragraph49_b_VS1
         CLmax = self.concept.performance.CLmax
         CLmin = self.concept.performance.CLmin
         VSi = (VS ** 2 * CLmax / abs(CLmin)) ** 0.5
 
         # Item (1), technically this is for VA, but I think it applies to VG too
+        def get_VGmin(n, weightfraction=None):
+            """Given manoeuvre load factor (and weight fraction), get VGmin."""
+            weightfraction = 1.0 if weightfraction is None else weightfraction
+            VGmin = VSi * (np.abs(n) / weightfraction) ** 0.5
+            return VGmin
+
         n2 = self.paragraph337_b_n2
-        output = {category: VSi * abs(n) ** 0.5 for (category, n) in n2.items()}
+        output = {
+            category: partial(get_VGmin, n)
+            for (category, n) in n2.items()
+        }
 
         return output
 
@@ -657,6 +812,34 @@ class CS23Amendment4:
         output = {category: VC_keas for (category, _) in output.items()}
 
         return output
+
+    @property
+    def paragraph335_d_VBmax(self) -> typing.Callable:
+        """
+        CS 23.335 Design airspeeds.
+        Sub-paragraph (d).
+
+        Raises:
+            NotImplementedError.
+
+        """
+        raise NotImplementedError("sorry!")
+
+    @property
+    def paragraph335_d_VBmin(self) -> typing.Callable:
+        """
+        CS 23.335 Design airspeeds.
+        Sub-paragraph (d).
+
+        Raises:
+            NotImplementedError.
+
+        Notes:
+            Assumes VS == VS1. This is true for MTOW, but otherwise the output
+            must be corrected using: Vcorr = V_output / (weightfraction ** 0.5).
+
+        """
+        raise NotImplementedError("sorry!")
 
     @property
     def paragraph337_a_n1(self) -> dict[str, float]:
@@ -751,31 +934,65 @@ class CS23Amendment4:
 
         return output
 
+    @property
+    def paragraph345_a_nF(self) -> float:
+        """
+        CS 23.345 High lift devices.
+        Sub-paragraph (a).
+
+        Returns:
+            Positive manoeuvring limit load factor for flight with high-lift
+            devices deployed.
+
+        """
+        return 2.0
+
+    @property
+    def paragraph345_b_VFmin(self) -> typing.Callable:
+        """
+        CS 23.345 High lift devices.
+        Sub-paragraph (b).
+
+        Returns:
+            Function for minimum design flap speed, VFmin, in knots EAS.
+            Accepts an optional argument 'weightfraction', defaults to 1.0.
+
+        """
+        VS1 = self.paragraph49_b_VS1  # MTOW stall, clean-config
+        VS0 = self.paragraph49_b_VS0  # MTOW stall, landing-config
+
+        def get_VFmin(weightfraction=None):
+            """Given optional parameter of weight fraction, get VFmin."""
+            weightfraction = 1.0 if weightfraction is None else weightfraction
+            VFmin = weightfraction ** 0.5 * max(1.4 * VS1, 1.8 * VS0)
+            return VFmin
+
+        return get_VFmin
+
 
 if __name__ == "__main__":
     from ADRpy import atmospheres as at
     from ADRpy import constraintanalysis as ca
     from ADRpy import unitconversions as co
 
-    designbrief = {"vstallclean_kcas": 46.3}
-
-    b_ft, S_ft2 = 38, 130
+    designbrief = {
+        "vstallclean_kcas": 101
+    }
 
     designdef = {
-        "aspectratio": b_ft ** 2 / S_ft2,
-        "weight_n": co.lbf2n(1320)
+        "aspectratio": 10.48,
+        "weight_n": co.lbf2n(17120)
     }
 
     designperf = {
-        "CLalpha": 5.25, "CLmax": 1.45, "CLmin": -1.00,
-        "CLmaxHL": 2.10, "CLminHL": -0.75
+        "CLmax": 1.6, "CLmin": -1, "CLalpha": 6.28
     }
 
-    designpropulsion = "Piston"
+    designatm = at.Atmosphere()  # set the design atmosphere to a zero-offset ISA
 
-    designatm = at.Atmosphere()
+    designpropulsion = "Turboprop"
 
-    concept = ca.AircraftConcept(
+    Beech1900Dconcept = ca.AircraftConcept(
         brief=designbrief,
         design=designdef,
         performance=designperf,
@@ -783,8 +1000,9 @@ if __name__ == "__main__":
         propulsion=designpropulsion
     )
 
-    aw_cs23 = CS23Amendment4(concept, ["normal"], co.feet22m2(S_ft2))
-    fig, ax = aw_cs23.plot_Vn()
-    plt.show()
+    Beech1900Dcs23spec = CS23Amendment4(Beech1900Dconcept, "commuter",
+                                        co.feet22m2(310))
 
-    pass
+    fig, ax = Beech1900Dcs23spec.plot_Vn(weightfraction=0.7)
+
+    plt.show()
