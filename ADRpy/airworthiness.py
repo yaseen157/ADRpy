@@ -394,7 +394,10 @@ class CS23Amendment4:
         secax_x.set_xticks([])
         secax_x.spines["bottom"].set_visible(False)
         ax.set_ylabel("Load factor, $n$")
-        ax.set_xticks(ax.get_xticks(), [""] + ax.get_xticklabels()[1:])
+
+        # The x-axis origin tick "0" intersects the y-axis. Here's a fix! But,
+        # ... annoyingly, this works locally and not in jupyter notebooks (???)
+        # ax.set_xticks(ax.get_xticks(), [""] + ax.get_xticklabels()[1:])
 
         # need to squash legend
         ax.legend()
