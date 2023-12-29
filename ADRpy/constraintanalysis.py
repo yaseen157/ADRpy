@@ -34,6 +34,7 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
         Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
         and Procedures," 1st ed., Elselvier, 2014.
     """
+
     def quadratic(CL, _CDmin, _k):
         """Standard, classical quadratic model for drag."""
         return _CDmin + _k * CL ** 2
@@ -87,7 +88,7 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
 
             if (CL > _CLmax).any():
                 warnmsg = f"Coefficient of lift exceeded CLmax={_CLmax}"
-                warnings.warn(warnmsg, category=RuntimeWarning)
+                # warnings.warn(warnmsg, category=RuntimeWarning)
                 CD[CL > _CLmax] = np.nan
 
             return CD
@@ -101,9 +102,20 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
 
 
 def get_default_concept_design_objects():
+    """
+    Create classes for storing and easy access to attributes of an aircraft
+    concept.
+
+    Returns:
+        A tuple of classes for storing design brief, design definition, and
+        design performance, respectively.
+
+    """
+
     class BaseMethods:
         """Default methods to run on instantiation."""
-        def __init__(self, dictionary: dict=None):
+
+        def __init__(self, dictionary: dict = None):
             """
             Args:
                 dictionary: key-value pairs with which to update default args.
@@ -112,7 +124,7 @@ def get_default_concept_design_objects():
                 return
 
             for key, value in dictionary.items():
-                # If we already have a default value
+                # If we already have a default value, overwrite it
                 if hasattr(self, key):
                     # A value that is type dict, should update the original dict
                     if isinstance(value, dict):
@@ -121,7 +133,8 @@ def get_default_concept_design_objects():
                     else:
                         setattr(self, key, value)
                 # There is no default value, but the parameter exists, so set it
-                elif hasattr(self, "__annotations__") and (key in self.__annotations__):
+                elif hasattr(self, "__annotations__") and (
+                        key in self.__annotations__):
                     setattr(self, key, value)
                 else:
                     errormsg = f"Unknown {key=} for {type(self).__name__}"
@@ -160,7 +173,7 @@ def get_default_concept_design_objects():
         sweep_25_deg: float
         taperratio: float
         # Weight and loading
-        weight_n: float
+        weight_n: float = None
         weightfractions = {
             x: 1.0
             for x in ["climb", "cruise", "servceil", "take-off", "turn"]
@@ -174,7 +187,8 @@ def get_default_concept_design_objects():
 
             if not hasattr(self, "sweep_25_deg"):
                 self.sweep_25_deg = (
-                    (2 / 7) * self.sweep_le_deg + (5 / 7) * self.sweep_mt_deg)
+                        (2 / 7) * self.sweep_le_deg + (
+                        5 / 7) * self.sweep_mt_deg)
 
             if not hasattr(self, "taperratio"):
                 # Optimal root taper ratio (if one is not provided)
@@ -191,9 +205,13 @@ def get_default_concept_design_objects():
         # Lift coefficients
         CL0 = 0.0
         CLTO = 0.95
+        CLalpha = 5.2
+        CLmax: float
+        CLmaxHL: float
         CLmaxTO = 1.5
-        CLmax = 1.1
+        CLmin: float
         CLminD = 0.2
+        CLminHL: float
         # Propulsive efficiencies
         eta_prop = dict([
             ("climb", 0.75), ("cruise", 0.85), ("servceil", 0.65),
@@ -202,8 +220,10 @@ def get_default_concept_design_objects():
 
     return DesignBrief, DesignDefinition, DesignPerformance
 
+
 _class_brief, _class_definition, _class_performance = (
     get_default_concept_design_objects())
+
 
 class AircraftConcept:
     """
@@ -358,18 +378,34 @@ class AircraftConcept:
                     Float. Take-off lift coefficient. Optional, defaults to
                     0.95.
 
+                CLalpha
+                    Float. The three-dimensional lift curve slope of the
+                    aircraft, per radian. Optional, defaults to CLalpha=5.2.
+
+                CLmax
+                    Float. Maximum lift coefficient in flight, with the aircraft
+                    in a clean configuration.
+
+                CLmaxHL
+                    Float. Maximum lift coefficient in flight, with the aircraft
+                    in a high-lift configuration.
+
                 CLmaxTO
                     Float. Maximum lift coefficient in take-off conditions.
                     Optional, defaults to 1.5.
 
-                CLmax
-                    Float. Maximum lift coefficient in flight, in clean
-                    configuration. Optional, defaults to 1.1.
+                CLmin
+                    Float. Minimum lift coefficient in flight, with the aircraft
+                    in a clean configuration.
 
                 CLminD
                     Float. The coefficient of lift at which the drag coefficient
-                        is minimised, in clean configuration. Optional, defaults
-                        to 0.2.
+                    is minimised, in clean configuration. Optional, defaults
+                    to 0.2.
+
+                CLminHL
+                    Float. Minimum lift coefficient in flight, with the aircraft
+                    in a high-lift configuration.
 
                 eta_prop
                     Dictionary. Propeller efficiency in various phases of the
@@ -797,7 +833,7 @@ class AircraftConcept:
         wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
-            warnings.warn(warnmsg, RuntimeWarning)
+            # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... load factor due to climb
@@ -880,7 +916,7 @@ class AircraftConcept:
         wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
-            warnings.warn(warnmsg, RuntimeWarning)
+            # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... coefficient of drag
@@ -954,7 +990,7 @@ class AircraftConcept:
         wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
-            warnings.warn(warnmsg, RuntimeWarning)
+            # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... load factor due to climb
@@ -1108,7 +1144,7 @@ class AircraftConcept:
         wslim_pa = np.inf if CLmax is None else CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
-            warnings.warn(warnmsg, RuntimeWarning)
+            # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... coefficient of drag
@@ -1250,18 +1286,20 @@ class AircraftConcept:
         if np.isfinite(xstall):
             yx1x2 = [0, ylim], xstall, xs.min() if weight_n else xs.max()
             clr = colours[len(constraint_fs)]
-            l2d = ax.axvline(xstall, label="clean stall, 1g", c=clr, zorder=10)
-            ax.fill_betweenx(*yx1x2, fc=l2d.get_color(), alpha=0.2, zorder=5)
+            l2d = ax.axvline(
+                xstall, label="clean stall, 1g", c=clr, zorder=10, lw=2)
+            ax.fill_betweenx(*yx1x2, fc=l2d.get_color(), alpha=0.05, zorder=5)
 
         # Plot the stall limit due to all constraints
         nanindex = np.isnan(np.array(list(ys.values()))).sum(axis=1).max()
         yx1x2 = [0, ylim], xs[-nanindex], xs.min() if weight_n else xs.max()
         if nanindex > 0:
-            kkka = (0, 0, 0, 0.2)
+            kkka = (0.98039215686, 0.50196078431, 0.44705882352, 0.01)
             ax.fill_betweenx(
-                *yx1x2, fc=kkka, ec="r", zorder=15, hatch="x",
-                label=r"above $C_{L,max}$"
-            )
+                *yx1x2, fc=kkka, ec="r", zorder=5, hatch="x", alpha=0.1,
+                label=r"above $C_{L,max}$")
+            ax.fill_betweenx(*yx1x2, fc=(0, 0, 0, 0), ec="fuchsia", lw=2,
+                             label=r"above $C_{L,max}$")
 
         # Limits and positioning
         ax.set_xlim(xs.min(), xs.max())
@@ -1269,42 +1307,60 @@ class AircraftConcept:
         ax.grid()
 
         # Custom legend behaviour - allow user to redraw legend w/default posns!
-        def custom_legend_maker(*args, **kwargs):
+        ax.legend()
+        # Squash the handles of legend handles shared by more than one label
+        handles, labels = ax.get_legend_handles_labels()
+        legenddict = {l: tuple(np.array(handles)[np.array(labels) == l])
+                      for l in labels}
+        legenddict = dict(zip(("labels", "handles"), zip(*legenddict.items())))
+
+        def custom_legend_maker(**kwargs):
             """A matplotlib legend but with default position parameters."""
             default_legend_kwargs = dict([
                 ("bbox_to_anchor", (1.05, 0.618)),
                 ("loc", "center left")
             ])
-            return ax.legend(*args, **{**default_legend_kwargs, **kwargs})
+            default_legend_kwargs.update(legenddict)
+            return ax.legend(**{**default_legend_kwargs, **kwargs})
 
         ax.remake_legend = custom_legend_maker  # Assign the method to our ax
         ax.remake_legend()  # Use the method
 
-        # Default labelling - set defaults (quantities normalised by weight)
-        ax.set_xlabel("Wing Loading [Pa]")
-        if type_is_power:
-            ax.set_ylabel("Power-to-Weight")
-        else:
-            ax.set_ylabel("Thrust-to-Weight")
-
-        if weight_n is None:
-            return fig, ax
-
         # Advanced labelling - Multiple unit labelling
         # All the magic below allows the Axes object to have primary axes for
         # the actual plot data to be in SI units, but display in other units
+        if weight_n is None:
+            xlabel_loc_metric = (1.09, -0.02)
+            yloc = -0.12  # Shared y-location of secondary and tertiary axes
+            # x, metric
+            ax.set_xlabel("[Pa]")
+            ax.xaxis.set_label_coords(*xlabel_loc_metric)
+            # x, imperial
+            ax2_x = ax.secondary_xaxis(yloc)
+            ax2_x.set_xlabel("[lb$_f$/ft$^2$]")
+            ax2_x.xaxis.set_label_coords(*xlabel_loc_metric)
+            ax2_x.set_xticks([])
+            # x, label
+            ax3_x = ax.secondary_xaxis(yloc,
+                                       functions=(co.pa2lbfft2, co.lbfft22pa))
+            ax3_x.set_xlabel("Wing Loading")
+            if type_is_power:
+                ax.set_ylabel("Power-to-Weight")
+            else:
+                ax.set_ylabel("Thrust-to-Weight")
+            return fig, ax
         # x, metric
         ax.set_xlabel("[m$^2$]")
         ax.xaxis.set_label_coords(1.09, -0.02)
         # x, imperial
         yloc = -0.12  # Shared y-location of secondary and tertiary axes
-        secax_x = ax.secondary_xaxis(yloc, functions=(co.m22feet2, co.feet22m2))
-        secax_x.set_xlabel("[ft$^2$]")
-        secax_x.xaxis.set_label_coords(1.09, -0.02)
-        secax_x.set_xticks([])
+        ax2_x = ax.secondary_xaxis(yloc, functions=(co.m22feet2, co.feet22m2))
+        ax2_x.set_xlabel("[ft$^2$]")
+        ax2_x.xaxis.set_label_coords(1.09, -0.02)
+        ax2_x.set_xticks([])
         # x, label
-        terax_x = ax.secondary_xaxis(yloc, functions=(co.m22feet2, co.feet22m2))
-        terax_x.set_xlabel("Wing Area")
+        ax3_x = ax.secondary_xaxis(yloc, functions=(co.m22feet2, co.feet22m2))
+        ax3_x.set_xlabel("Wing Area")
         if type_is_power:
             # y, metric
             ax.set_yticks([])

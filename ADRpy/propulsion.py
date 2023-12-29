@@ -43,7 +43,7 @@ for deck_type in engine_deck_types:
         # Add to catalogue
         engine_catalogue[enginename] = dict([
             ("path", filepath),
-            ("type", deck_type),
+            ("type", deck_type.lower()),  # Just be doubly sure its lower case!
             ("dataframes", dict())
         ])
 
