@@ -1353,7 +1353,7 @@ class AircraftConcept:
             clr = colours[len(constraint_fs)]
             l2d = ax.axvline(
                 xstall, label="clean stall, 1g", c=clr, zorder=10, lw=2)
-            ax.fill_betweenx(*yx1x2, fc=l2d.get_color(), alpha=0.05, zorder=5)
+            ax.fill_betweenx(*yx1x2, fc=l2d.get_color(), alpha=0.1, zorder=5)
 
         # Plot the stall limit due to all constraints
         nanindex = np.isnan(np.array(list(ys.values()))).sum(axis=1).max()
