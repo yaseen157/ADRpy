@@ -591,24 +591,7 @@ class AircraftConcept:
 
         return cdi_factor
 
-    def _get_LDmax(self, **kwargs):
-        """Experimental method for getting the maximum lift to drag ratio."""
-        # Recast as necessary
-        CDmin = self.performance.CDmin
-        CLmax = self.performance.CLmax
-
-        # Differentiated simple drag model, solve CD0 - k CL^2 = 0.0
-        k = self.cdi_factor(method="Nita-Scholz", **kwargs)
-        CL = (CDmin / k) ** 0.5
-        if CL > CLmax:
-            # warnmsg = f"Couldn't achieve (L/D)max, needed {CL=} ({CLmax=})"
-            # warnings.warn(warnmsg, RuntimeWarning)
-            CL = np.clip(CL, None, CLmax)
-
-        LDmax = CL / (CDmin + k * CL ** 2)
-        return LDmax
-
-    def get_bestclimbangle_Vx(self, wingloading_pa, altitude_m=None):
+    def get_bestVx(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, Vx, which results in the best angle of climb.
 
@@ -628,8 +611,8 @@ class AircraftConcept:
         wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
         altitude_m = 0 if altitude_m is None else altitude_m
         altitude_m = actools.recastasnpfloatarray(altitude_m)
-        wingloading_pa, altitude_m \
-            = np.broadcast_arrays(wingloading_pa, altitude_m)
+        wingloading_pa, altitude_m = \
+            np.broadcast_arrays(wingloading_pa, altitude_m)
         CDmin = self.performance.CDmin
         weight_n = self.design.weight_n
 
@@ -638,6 +621,7 @@ class AircraftConcept:
 
         if self.propulsion.type in ["turbofan", "turbojet"]:
 
+            bestCL, LDmax = self.get_bestCL_endurance(constantspeed=True)
             densfactor = 2 / rho_kgpm3
 
             def f_obj(Vx, i):
@@ -645,21 +629,20 @@ class AircraftConcept:
 
                 # Gudmundsson, eq. (18-21)
                 mach = Vx / vsound_mps.flat[i]
-                k = self.cdi_factor(mach=mach, method="Nita-Scholz")
                 thrust = self.propulsion.thrust(
                     mach, altitude_m.flat[i], norm=False
                 )
-                LDmax = self._get_LDmax(mach=mach)
                 theta_max = np.arcsin(np.clip(
                     thrust / weight_n - 1 / LDmax,
                     None, 1  # Limit theta_max to 90 degrees climb angle
                 ))
 
                 # Gudmundsson, eq. (18-22)
-                bestspeed_guess_mps = (densfactor.flat[i]
-                                       * wingloading_pa.flat[i]
-                                       * (k / CDmin) ** 0.5  # == CL ** -.5
-                                       * np.cos(theta_max)) ** 0.5
+                bestspeed_guess_mps = \
+                    (densfactor
+                     * wingloading_pa / bestCL
+                     * np.cos(theta_max)
+                     ).flat[i] ** 0.5
 
                 return bestspeed_guess_mps
 
@@ -698,7 +681,7 @@ class AircraftConcept:
 
         return bestspeed_mps
 
-    def get_bestclimbrate_Vy(self, wingloading_pa, altitude_m=None):
+    def get_bestVy(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, Vy, which results in the best rate of climb.
 
@@ -720,8 +703,8 @@ class AircraftConcept:
         altitude_m = 0 if altitude_m is None else altitude_m
         altitude_m = actools.recastasnpfloatarray(altitude_m)
 
-        wingloading_pa, altitude_m \
-            = np.broadcast_arrays(wingloading_pa, altitude_m)
+        wingloading_pa, altitude_m = \
+            np.broadcast_arrays(wingloading_pa, altitude_m)
         CDmin = self.performance.CDmin
 
         rho_kgpm3 = self.designatm.airdens_kgpm3(altitude_m)
@@ -730,6 +713,7 @@ class AircraftConcept:
         if self.propulsion.type in ["turbofan", "turbojet"]:
 
             wsfactor = wingloading_pa / 3 / rho_kgpm3 / CDmin
+            bestCL, LDmax = self.get_bestCL_endurance(constantspeed=True)
 
             def f_obj(Vy, i):
                 """Helper func: Objective function. Accepts guess of Vy."""
@@ -740,42 +724,124 @@ class AircraftConcept:
                     mach, altitude_m.flat[i], norm=False)
                 weight_n = self.design.weight_n
                 tw = thrust_n / weight_n
-                LDmax = self._get_LDmax(mach=mach)
                 ldfactor = 1 + (1 + 3 / LDmax ** 2 / tw ** 2) ** 0.5
                 bestspeed_guess_mps = (tw * wsfactor.flat[i] * ldfactor) ** 0.5
 
                 return bestspeed_guess_mps
 
+            # def f_opt(Vy, i):
+            #     """Helper func: Solve for Vy."""
+            #     return f_obj(Vy, i) - Vy
+
+            bestspeed_mps = np.array([
+                optimize.newton(
+                    lambda v, arg: f_obj(v, arg) - v, x0=100.0, args=(i,))
+                for i, _ in enumerate(wingloading_pa.flat)
+            ]).reshape(wingloading_pa.shape)
+
+            return bestspeed_mps
+
         elif self.propulsion.type in ["turboprop", "piston"]:
 
-            densfactor = 2 / rho_kgpm3
+            # Gudmundsson, eq. (20-21) says that...
+            # We need to maximise specific excess power
+            # ... which happens when we minimise power required
+            # ... which happens in eq. (20-21) at best endurance condition
+            bestCL, _ = self.get_bestCL_endurance(constantspeed=False)
+            best_speed_mps = (2 / rho_kgpm3 * wingloading_pa / bestCL) ** 0.5
 
-            def f_obj(Vy, i):
-                """Helper func: Objective function. Accepts guess of Vy."""
+            return best_speed_mps
 
-                # Gudmundsson, eq. (18-27)
-                mach = Vy / vsound_mps.flat[i]
-                k = self.cdi_factor(mach=mach, method="Nita-Scholz")
-                dragfactor = (k / (3 * CDmin)) ** 0.5
-                bestspeed_guess_mps = (densfactor.flat[i]
-                                       * wingloading_pa.flat[i]
-                                       * dragfactor) ** 0.5
+        raise NotImplementedError("Unsupported propulsion system type")
 
-                return bestspeed_guess_mps
+    def get_bestCL_range(self, constantspeed: bool = None) -> tuple:
+        """
+        Estimate the best coefficient of lift for a maximum range type cruising
+        profile.
 
+        Args:
+            constantspeed: Flags whether constraint considers cruise speed as
+                a constant over the particular cruise profile. Optional,
+                defaults to False (implies constant-altitude/constant-attitude).
+
+        Returns:
+            Tuple of (the best coefficient of lift, L/D ratio at this CL).
+
+        References:
+            Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
+            and Procedures," 1st ed., Elselvier, 2014.
+
+        Notes:
+            Gudmundsson, section 20.2 "Range Analysis," provides several
+            equations (20-10, 20-11, 20-12) that are all proportional to
+            CL ** exponent / CD. This method simply maximises that term.
+            If you're just trying to maximise L/D, set 'constantspeed' to True.
+
+        """
+        # Recast as necessaary
+        constantspeed = False if constantspeed is None else constantspeed
+        exponent = 0.5 if constantspeed is False else 1.0
+
+        CDmin = self.performance.CDmin
+        CLmax = self.performance.CLmax
+        CLminD = self.performance.CLminD
+
+        # Maximising CL / CD is the same as: Minimise -1.0 * CL / CD
+        k = self.cdi_factor()
+        f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
+        bestCL, = optimize.minimize(
+            lambda x: -x ** exponent / f_CD(x), x0=np.array([0.8]),
+            bounds=((CLminD, CLmax),)
+        ).x
+        LDratio = bestCL / f_CD(bestCL)
+
+        return bestCL, LDratio
+
+    def get_bestCL_endurance(self, constantspeed: bool = None) -> tuple:
+        """
+        Estimate the best coefficient of lift for a maximum endurance type
+        cruising profile.
+
+        Args:
+            constantspeed: Flags whether constraint considers cruise speed as
+                a constant over the particular cruise profile. Optional,
+                defaults to False (implies constant-altitude/constant-attitude).
+
+        Returns:
+            Tuple of (the best coefficient of lift, L/D ratio at this CL).
+
+        References:
+            Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
+            and Procedures," 1st ed., Elselvier, 2014.
+
+        Notes:
+            Gudmundsson, section 20.4 "... Endurance Analysis," provides several
+            equations (20-19, 20-20, 20-21, 20-22) that are all proportional to
+            CL ** exponent / CD. This method simply maximises that term.
+            If you're just trying to maximise L/D, set 'constantspeed' to True.
+
+        """
+        # Recast as necessaary
+        constantspeed = False if constantspeed is None else constantspeed
+        if self.propulsion.type in ["piston", "turboprop"]:
+            exponent = 1.5 if constantspeed is False else 1.0
         else:
-            raise NotImplementedError("Unsupported propulsion system type")
+            exponent = 1.0
 
-        def f_opt(Vy, i):
-            """Helper func: Solve for Vy."""
-            return f_obj(Vy, i) - Vy
+        CDmin = self.performance.CDmin
+        CLmax = self.performance.CLmax
+        CLminD = self.performance.CLminD
 
-        bestspeed_mps = np.array([
-            optimize.newton(f_opt, x0=100.0, args=(i,))
-            for i, _ in enumerate(wingloading_pa.flat)
-        ]).reshape(wingloading_pa.shape)
+        # Maximising CL / CD is the same as: Minimise -1.0 * CL / CD
+        k = self.cdi_factor()
+        f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
+        bestCL, = optimize.minimize(
+            lambda x: -x ** exponent / f_CD(x), x0=np.array([0.8]),
+            bounds=((CLminD, CLmax),)
+        ).x
+        LDratio = bestCL / f_CD(bestCL)
 
-        return bestspeed_mps
+        return bestCL, LDratio
 
     def constrain_climb(self, wingloading_pa):
         """
