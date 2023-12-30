@@ -15,8 +15,6 @@ from ADRpy import atmospheres as at
 from ADRpy.mtools4acdc import recastasnpfloatarray
 from ADRpy import unitconversions as uc
 
-__all__ = ["engine_catalogue", "EngineDeck", "TurbofanHiBPR", "TurbofanLoBPR",
-           "Turbojet", "Turboprop", "Piston", "SuperchargedPiston"]
 __author__ = "Yaseen Reza"
 
 # Other contributors: Samuel Pearson
@@ -63,23 +61,20 @@ class EngineDeck:
 
     def __new__(cls, engine: str):
 
-        validtypes = {  # generic deck types
-            TurbofanHiBPR.__name__: TurbofanHiBPR,
-            TurbofanLoBPR.__name__: TurbofanLoBPR,
-            Turbojet.__name__: Turbojet,
-            Turboprop.__name__: Turboprop,
-            Piston.__name__: Piston,
-            SuperchargedPiston.__name__: SuperchargedPiston,
-            ElectricMotor.__name__: ElectricMotor
-        }
-        # If the engine specified is actually in the form "type:<x>"
+        if engine is None:
+            return NoDeck()
+
+        # generic deck types
+        validtypes = {deck.__name__: deck for deck in genericdecks}
+
+        # If the engine specified is actually in the form "class:<x>"
         if engine.startswith("class:"):
 
             enginetype = engine.lstrip("class:")
             genericclass = validtypes.get(enginetype)
 
             if genericclass is None:
-                errormsg = f"{engine=} not recognised. Try one of {validtypes=}"
+                errormsg = f"'{engine}' isn't valid. Try one of {validtypes=}"
                 raise ValueError(errormsg)
             return genericclass()
 
@@ -156,6 +151,7 @@ class EngineDeck:
         norm = True if norm else False
 
         # Compute thrust (and normalise to sea-level static if needed)
+        # Note: _f_thrust should be defined for real-world data turboprop decks.
         if self._f_thrust is NotImplemented:
             if norm is True:
                 raise RuntimeError("Can't find static thrust!")
@@ -422,6 +418,40 @@ def xyz_interpolator(x: np.ndarray, y: typing.Union[np.ndarray, None],
         interp = CloughTocher2DInterpolator(xy.T, z)
 
     return interp
+
+
+# ---------------------------------------------------------------------------- #
+# Engine models to act as placeholders
+class NoDeck:
+    """A placeholder deck, produces no real airspeed or altitude corrections."""
+    name = "No deck"
+    type = None
+
+    @classmethod
+    def thrust(cls, mach, altitude_m, *, norm: bool = True, **kwargs):
+        """Dumb method, returns unity (broadcasted against mach, altitude_m)."""
+        mach = recastasnpfloatarray(mach)
+        altitude_m = recastasnpfloatarray(altitude_m)
+        _, altitude_m = np.broadcast_arrays(mach, altitude_m)
+
+        if norm is not True:
+            errormsg = f"{cls.name} must use norm=True, found that {norm=}"
+            raise RuntimeError(errormsg)
+
+        return np.ones(altitude_m.shape)
+
+    @classmethod
+    def shaftpower(cls, mach, altitude_m, *, norm: bool = True, **kwargs):
+        """Dumb method, returns unity (broadcasted against mach, altitude_m)."""
+        mach = recastasnpfloatarray(mach)
+        altitude_m = recastasnpfloatarray(altitude_m)
+        _, altitude_m = np.broadcast_arrays(mach, altitude_m)
+
+        if norm is not True:
+            errormsg = f"{cls.name} must use norm=True, found that {norm=}"
+            raise RuntimeError(errormsg)
+
+        return np.ones(altitude_m.shape)
 
 
 # ---------------------------------------------------------------------------- #
@@ -1146,3 +1176,14 @@ class ElectricMotor(_BasicPropeller):
         lapse = np.ones(altitude_m.shape)
 
         return lapse
+
+
+genericdecks = (
+    TurbofanHiBPR,
+    TurbofanLoBPR,
+    Turbojet,
+    Turboprop,
+    Piston,
+    SuperchargedPiston,
+    ElectricMotor
+)
