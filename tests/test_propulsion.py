@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-from ADRpy.propulsion import engine_catalogue, EngineDeck
+from ADRpy.propulsion import EngineDeck
 
 
 class SeaLevelLapse(unittest.TestCase):
@@ -15,12 +15,13 @@ class SeaLevelLapse(unittest.TestCase):
             "class:Turbojet",
             "class:Turboprop",
             "class:Piston",
-            "class:SuperchargedPiston"
+            "class:SuperchargedPiston",
+            "class:ElectricMotor"
         ]
         for decktype in genericdecktypes:
             deck = EngineDeck(decktype)
 
-            if deck.type == "piston":
+            if deck.type in ["piston", "electricmotor"]:
                 self.assertTrue(np.isclose(
                     deck.shaftpower(0, 0, norm=True), 1.0, atol=1e-3))
             elif deck.type == "turboprop":

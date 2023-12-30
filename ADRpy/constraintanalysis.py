@@ -10,7 +10,7 @@ from scipy import constants, optimize
 
 from ADRpy import atmospheres as at
 from ADRpy import unitconversions as co
-from ADRpy import mtools4acdc as actools
+from ADRpy.mtools4acdc import recastasnpfloatarray
 from ADRpy import propulsion as pdecks
 
 __author__ = "Yaseen Reza"
@@ -78,7 +78,7 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
 
             """
             # Recast as necessary
-            CL = actools.recastasnpfloatarray(CL)
+            CL = recastasnpfloatarray(CL)
 
             # Switch between models as we need to
             CDmod = A * CL ** 2 + B * CL + C
@@ -591,16 +591,53 @@ class AircraftConcept:
 
         return cdi_factor
 
-    def get_bestVx(self, wingloading_pa, altitude_m=None):
+    def get_bestV_BG(self, wingloading_pa, altitude_m=None):
         """
-        Estimate the speed, Vx, which results in the best angle of climb.
+        Estimate the speed, VBG, which results in best gliding performance.
 
         Args:
             wingloading_pa: Aircraft wing loading, in Pascal.
             altitude_m: Geopotential altitude, in metres.
 
         Returns:
-            Best climb angle speed Vx, in metres per second.
+            Best speed for glide VBG, in metres per second.
+
+        References:
+            Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
+            and Procedures," 1st ed., Elselvier, 2014.
+
+        Notes:
+            Not only is this the best glide speed for jet and propeller-powered
+            aicraft, it is also the best endurance speed for jets and the best
+            range speed for propeller aircraft.
+
+        """
+        # Recast as necessary
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        altitude_m = 0 if altitude_m is None else altitude_m
+        altitude_m = recastasnpfloatarray(altitude_m)
+        wingloading_pa, altitude_m = \
+            np.broadcast_arrays(wingloading_pa, altitude_m)
+
+        # The bestCL range/endurance functions maximise CL/CD @ constant speed V
+        bestCL, _ = self.get_bestCL_range(constantspeed=True)
+
+        rho_kgpm3 = self.designatm.airdens_kgpm3(altitude_m)
+        bestspeed_mps = (2 / rho_kgpm3 * wingloading_pa / bestCL) ** 0.5
+
+        return bestspeed_mps
+
+    def get_bestV_CAR(self, wingloading_pa, altitude_m=None):
+        """
+        Estimate the speed, VCAR, which results in best jet range. This is also
+        known as Carson's speed, for jet and propeller aircraft.
+
+        Args:
+            wingloading_pa: Aircraft wing loading, in Pascal.
+            altitude_m: Geopotential altitude, in metres.
+
+        Returns:
+            Best speed for jet range VCAR, in metres per second.
 
         References:
             Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
@@ -608,11 +645,44 @@ class AircraftConcept:
 
         """
         # Recast as necessary
-        wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
         altitude_m = 0 if altitude_m is None else altitude_m
-        altitude_m = actools.recastasnpfloatarray(altitude_m)
+        altitude_m = recastasnpfloatarray(altitude_m)
         wingloading_pa, altitude_m = \
             np.broadcast_arrays(wingloading_pa, altitude_m)
+
+        # Gudmundsson, eq. (19-22)
+        # The bestCL range function maximise CL**0.5/CD @ variable speed V
+        bestCL, _ = self.get_bestCL_range(constantspeed=False)
+
+        rho_kgpm3 = self.designatm.airdens_kgpm3(altitude_m)
+        bestspeed_mps = (2 / rho_kgpm3 * wingloading_pa / bestCL) ** 0.5
+
+        return bestspeed_mps
+
+    def get_bestV_X(self, wingloading_pa, altitude_m=None):
+        """
+        Estimate the speed, VX, which results in the best angle of climb.
+
+        Args:
+            wingloading_pa: Aircraft wing loading, in Pascal.
+            altitude_m: Geopotential altitude, in metres.
+
+        Returns:
+            Best climb angle speed VX, in metres per second.
+
+        References:
+            Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
+            and Procedures," 1st ed., Elselvier, 2014.
+
+        """
+        # Recast as necessary
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        altitude_m = 0 if altitude_m is None else altitude_m
+        altitude_m = recastasnpfloatarray(altitude_m)
+        wingloading_pa, altitude_m = \
+            np.broadcast_arrays(wingloading_pa, altitude_m)
+
         CDmin = self.performance.CDmin
         weight_n = self.design.weight_n
 
@@ -624,11 +694,11 @@ class AircraftConcept:
             bestCL, LDmax = self.get_bestCL_endurance(constantspeed=True)
             densfactor = 2 / rho_kgpm3
 
-            def f_obj(Vx, i):
-                """Helper func: Objective function. Accepts guess of Vx."""
+            def f_obj(VX, i):
+                """Helper func: Objective function. Accepts guess of VX."""
 
                 # Gudmundsson, eq. (18-21)
-                mach = Vx / vsound_mps.flat[i]
+                mach = VX / vsound_mps.flat[i]
                 thrust = self.propulsion.thrust(
                     mach, altitude_m.flat[i], norm=False
                 )
@@ -646,20 +716,20 @@ class AircraftConcept:
 
                 return bestspeed_guess_mps
 
-            def f_opt(Vx, i):
-                """Helper func: Solve for Vx."""
-                return f_obj(Vx, i) - Vx
+            def f_opt(VX, i):
+                """Helper func: Solve for VX."""
+                return f_obj(VX, i) - VX
 
-        elif self.propulsion.type in ["turboprop", "piston"]:
+        elif self.propulsion.type in ["turboprop", "piston", "electricmotor"]:
 
             eta_prop = self.performance.eta_prop["climb"]
             weight_n = self.design.weight_n
 
-            def f_opt(Vx, i):
-                """Helper func: Solve for Vx, for each coefficient index i."""
+            def f_opt(VX, i):
+                """Helper func: Solve for VX, for each coefficient index i."""
 
                 # Gudmundsson, eq. (18-26)
-                mach = Vx / vsound_mps.flat[i]
+                mach = VX / vsound_mps.flat[i]
                 shaftpower = self.propulsion.shaftpower(
                     mach, altitude_m.flat[i], norm=False)
                 power = eta_prop * shaftpower
@@ -669,7 +739,7 @@ class AircraftConcept:
                 c2 = (wingloading_pa.flat[i] ** 2 * 4 * k
                       / rho_kgpm3.flat[i] ** 2 / CDmin)
 
-                return Vx ** 4 + c1 * Vx - c2
+                return VX ** 4 + c1 * VX - c2
 
         else:
             raise NotImplementedError("Unsupported propulsion system type")
@@ -681,9 +751,9 @@ class AircraftConcept:
 
         return bestspeed_mps
 
-    def get_bestVy(self, wingloading_pa, altitude_m=None):
+    def get_bestV_Y(self, wingloading_pa, altitude_m=None):
         """
-        Estimate the speed, Vy, which results in the best rate of climb.
+        Estimate the speed, VY, which results in the best rate of climb.
 
         Args:
             wingloading_pa: Aircraft wing loading, in Pascal.
@@ -691,17 +761,22 @@ class AircraftConcept:
                 sea-level (0 metres).
 
         Returns:
-            Best rate of climb speed Vy, in metres per second.
+            Best rate of climb speed VY, in metres per second.
 
         References:
             Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
             and Procedures," 1st ed., Elselvier, 2014.
 
+        Notes:
+            Because this is contingent on minimising the power requirement for
+            flight (to maximise specific excess power), this is also the best
+            endurance speed for propeller-driven aircraft.
+
         """
         # Recast as necessary
-        wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
         altitude_m = 0 if altitude_m is None else altitude_m
-        altitude_m = actools.recastasnpfloatarray(altitude_m)
+        altitude_m = recastasnpfloatarray(altitude_m)
 
         wingloading_pa, altitude_m = \
             np.broadcast_arrays(wingloading_pa, altitude_m)
@@ -715,11 +790,11 @@ class AircraftConcept:
             wsfactor = wingloading_pa / 3 / rho_kgpm3 / CDmin
             bestCL, LDmax = self.get_bestCL_endurance(constantspeed=True)
 
-            def f_obj(Vy, i):
-                """Helper func: Objective function. Accepts guess of Vy."""
+            def f_obj(VY, i):
+                """Helper func: Objective function. Accepts guess of VY."""
 
                 # Gudmundsson, eq. (18-24)
-                mach = Vy / vsound_mps.flat[i]
+                mach = VY / vsound_mps.flat[i]
                 thrust_n = self.propulsion.thrust(
                     mach, altitude_m.flat[i], norm=False)
                 weight_n = self.design.weight_n
@@ -729,9 +804,9 @@ class AircraftConcept:
 
                 return bestspeed_guess_mps
 
-            # def f_opt(Vy, i):
-            #     """Helper func: Solve for Vy."""
-            #     return f_obj(Vy, i) - Vy
+            # def f_opt(VY, i):
+            #     """Helper func: Solve for VY."""
+            #     return f_obj(VY, i) - VY
 
             bestspeed_mps = np.array([
                 optimize.newton(
@@ -741,16 +816,16 @@ class AircraftConcept:
 
             return bestspeed_mps
 
-        elif self.propulsion.type in ["turboprop", "piston"]:
+        elif self.propulsion.type in ["turboprop", "piston", "electricmotor"]:
 
             # Gudmundsson, eq. (20-21) says that...
             # We need to maximise specific excess power
             # ... which happens when we minimise power required
             # ... which happens in eq. (20-21) at best endurance condition
             bestCL, _ = self.get_bestCL_endurance(constantspeed=False)
-            best_speed_mps = (2 / rho_kgpm3 * wingloading_pa / bestCL) ** 0.5
+            bestspeed_mps = (2 / rho_kgpm3 * wingloading_pa / bestCL) ** 0.5
 
-            return best_speed_mps
+            return bestspeed_mps
 
         raise NotImplementedError("Unsupported propulsion system type")
 
@@ -823,10 +898,12 @@ class AircraftConcept:
         """
         # Recast as necessaary
         constantspeed = False if constantspeed is None else constantspeed
-        if self.propulsion.type in ["piston", "turboprop"]:
+        if self.propulsion.type in ["piston", "turboprop", "electricmotor"]:
             exponent = 1.5 if constantspeed is False else 1.0
-        else:
+        elif self.propulsion.type in ["turbojet", "turbofan"]:
             exponent = 1.0
+        else:
+            raise NotImplementedError("Unsupported propulsion system type")
 
         CDmin = self.performance.CDmin
         CLmax = self.performance.CLmax
@@ -843,7 +920,7 @@ class AircraftConcept:
 
         return bestCL, LDratio
 
-    def constrain_climb(self, wingloading_pa):
+    def constrain_climb(self, wingloading_pa, **kwargs):
         """
         Compute the thrust-to-weight and the power-to-weight (if applicable)
         requirements to climb as prescribed in the design brief for the concept.
@@ -863,13 +940,14 @@ class AircraftConcept:
 
         """
         # Recast as necessary
-        wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        climbalt_m = self.brief.climbalt_m
-        climbspeed_kias = self.brief.climbspeed_kias
-        climbrate_fpm = self.brief.climbrate_fpm
-        CDmin = self.performance.CDmin
-        CLmax = self.performance.CLmax
-        CLminD = self.performance.CLminD
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        climbalt_m = kwargs.get("climbalt_m", self.brief.climbalt_m)
+        climbspeed_kias = kwargs.get(
+            "climbspeed_kias", self.brief.climbspeed_kias)
+        climbrate_fpm = kwargs.get("climbrate_fpm", self.brief.climbrate_fpm)
+        CDmin = kwargs.get("CDmin", self.performance.CDmin)
+        CLmax = kwargs.get("CLmax", self.performance.CLmax)
+        CLminD = kwargs.get("CLminD", self.performance.CLminD)
 
         # Determine the thrust and power lapse corrections
         climbspeed_mpsias = co.kts2mps(climbspeed_kias)
@@ -879,12 +957,12 @@ class AircraftConcept:
         )
         mach = climbspeed_mpstas / self.designatm.vsound_mps(climbalt_m)
         tcorr = self.propulsion.thrust(
-            mach=mach, altitude=climbalt_m, norm=True,
+            mach=mach, altitude_m=climbalt_m, norm=True,
             eta_prop=self.performance.eta_prop["climb"]
         )
-        if self.propulsion.type in ["piston", "turboprop"]:
+        if self.propulsion.type in ["piston", "turboprop", "electricmotor"]:
             pcorr = self.propulsion.shaftpower(
-                mach=mach, altitude=climbalt_m, norm=True
+                mach=mach, altitude_m=climbalt_m, norm=True
             ) * self.performance.eta_prop["climb"]
         else:
             pcorr = np.nan
@@ -929,7 +1007,7 @@ class AircraftConcept:
 
         return tw, pw
 
-    def constrain_cruise(self, wingloading_pa):
+    def constrain_cruise(self, wingloading_pa, **kwargs):
         """
         Compute the thrust-to-weight and the power-to-weight (if applicable)
         requirements to cruise as prescribed in the design brief for the
@@ -950,24 +1028,26 @@ class AircraftConcept:
 
         """
         # Recast as necessary
-        wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        cruisealt_m = self.brief.cruisealt_m
-        cruisespeed_ktas = self.brief.cruisespeed_ktas
-        cruisethrustfact = self.brief.cruisethrustfact
-        CDmin = self.performance.CDmin
-        CLmax = self.performance.CLmax
-        CLminD = self.performance.CLminD
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        cruisealt_m = kwargs.get("cruisealt_m", self.brief.cruisealt_m)
+        cruisespeed_ktas = kwargs.get(
+            "cruisespeed_ktas", self.brief.cruisespeed_ktas)
+        cruisethrustfact = kwargs.get(
+            "cruisethrustfact", self.brief.cruisethrustfact)
+        CDmin = kwargs.get("CDmin", self.performance.CDmin)
+        CLmax = kwargs.get("CLmax", self.performance.CLmax)
+        CLminD = kwargs.get("CLminD", self.performance.CLminD)
 
         # Determine the thrust and power lapse corrections
         cruisespeed_mpstas = co.kts2mps(cruisespeed_ktas)
         mach = cruisespeed_mpstas / self.designatm.vsound_mps(cruisealt_m)
         tcorr = cruisethrustfact * self.propulsion.thrust(
-            mach=mach, altitude=cruisealt_m, norm=True,
+            mach=mach, altitude_m=cruisealt_m, norm=True,
             eta_prop=self.performance.eta_prop["cruise"]
         )
-        if self.propulsion.type in ["piston", "turboprop"]:
+        if self.propulsion.type in ["piston", "turboprop", "electricmotor"]:
             pcorr = self.propulsion.shaftpower(
-                mach=mach, altitude=cruisealt_m, norm=True
+                mach=mach, altitude_m=cruisealt_m, norm=True
             ) * self.performance.eta_prop["cruise"]
         else:
             pcorr = np.nan
@@ -1000,7 +1080,7 @@ class AircraftConcept:
 
         return tw, pw
 
-    def constrain_servceil(self, wingloading_pa):
+    def constrain_servceil(self, wingloading_pa, **kwargs):
         """
         Compute the thrust-to-weight and the power-to-weight (if applicable)
         requirements to fly at the service ceiling as prescribed in the design
@@ -1021,12 +1101,13 @@ class AircraftConcept:
 
         """
         # Recast as necessary
-        wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        servceil_m = self.brief.servceil_m
-        secclimbspd_kias = self.brief.secclimbspd_kias
-        CDmin = self.performance.CDmin
-        CLmax = self.performance.CLmax
-        CLminD = self.performance.CLminD
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        servceil_m = kwargs.get("servceil_m", self.brief.servceil_m)
+        secclimbspd_kias = kwargs.get(
+            "secclimbspd_kias", self.brief.secclimbspd_kias)
+        CDmin = kwargs.get("CDmin", self.performance.CDmin)
+        CLmax = kwargs.get("CLmax", self.performance.CLmax)
+        CLminD = kwargs.get("CLminD", self.performance.CLminD)
 
         # Determine the thrust and power lapse corrections
         secclimbspd_mpsias = co.kts2mps(secclimbspd_kias)
@@ -1036,12 +1117,12 @@ class AircraftConcept:
         )
         mach = secclimbspd_mpstas / self.designatm.vsound_mps(servceil_m)
         tcorr = self.propulsion.thrust(
-            mach=mach, altitude=servceil_m, norm=True,
+            mach=mach, altitude_m=servceil_m, norm=True,
             eta_prop=self.performance.eta_prop["servceil"]
         )
-        if self.propulsion.type in ["piston", "turboprop"]:
+        if self.propulsion.type in ["piston", "turboprop", "electricmotor"]:
             pcorr = self.propulsion.shaftpower(
-                mach=mach, altitude=servceil_m, norm=True
+                mach=mach, altitude_m=servceil_m, norm=True
             ) * self.performance.eta_prop["servceil"]
         else:
             pcorr = np.nan
@@ -1086,7 +1167,7 @@ class AircraftConcept:
 
         return tw, pw
 
-    def constrain_takeoff(self, wingloading_pa):
+    def constrain_takeoff(self, wingloading_pa, **kwargs):
         """
         Compute the thrust-to-weight and the power-to-weight (if applicable)
         requirements to perform take-off as prescribed in the design brief for
@@ -1107,15 +1188,13 @@ class AircraftConcept:
 
         """
         # Recast as necessary
-        wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        groundrun_m = self.brief.groundrun_m
-        rwyelevation_m = self.brief.rwyelevation_m
-        # to_headwind_kts = self.brief.to_headwind_kts
-        # to_slope_perc = self.brief.to_slope_perc
-        CDTO = self.performance.CDTO
-        mu_R = self.performance.mu_R
-        CLTO = self.performance.CLTO
-        CLmaxTO = self.performance.CLmaxTO
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        groundrun_m = kwargs.get("groundrun_m", self.brief.groundrun_m)
+        rwyelevation_m = kwargs.get("rwyelevation_m", self.brief.rwyelevation_m)
+        CDTO = kwargs.get("CDTO", self.performance.CDTO)
+        mu_R = kwargs.get("mu_R", self.performance.mu_R)
+        CLTO = kwargs.get("CLTO", self.performance.CLTO)
+        CLmaxTO = kwargs.get("CLmaxTO", self.performance.CLmaxTO)
 
         # Determine the weight lapse (relative to MTOW) correction
         wcorr = self.design.weightfractions["take-off"]
@@ -1133,12 +1212,12 @@ class AircraftConcept:
         machbar = vbar_mpstas / self.designatm.vsound_mps(rwyelevation_m)
         # (maybe we should use the altitude=0 sea-level take-off method below?)
         tcorr = self.propulsion.thrust(
-            mach=machbar, altitude=rwyelevation_m, norm=True,
+            mach=machbar, altitude_m=rwyelevation_m, norm=True,
             eta_prop=self.performance.eta_prop["take-off"]
         )
-        if self.propulsion.type in ["piston", "turboprop"]:
+        if self.propulsion.type in ["piston", "turboprop", "electricmotor"]:
             pcorr = self.propulsion.shaftpower(
-                mach=machbar, altitude=rwyelevation_m, norm=True
+                mach=machbar, altitude_m=rwyelevation_m, norm=True
             ) * self.performance.eta_prop["take-off"]
         else:
             pcorr = np.nan
@@ -1157,7 +1236,7 @@ class AircraftConcept:
 
         return tw, pw
 
-    def constrain_turn(self, wingloading_pa):
+    def constrain_turn(self, wingloading_pa, **kwargs):
         """
         Compute the thrust-to-weight and the power-to-weight (if applicable)
         requirements to carry out the constrained turn as prescribed in the
@@ -1178,24 +1257,24 @@ class AircraftConcept:
 
         """
         # Recast as necessary
-        wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
-        stloadfactor = self.brief.stloadfactor
-        turnalt_m = self.brief.turnalt_m
-        turnspeed_ktas = self.brief.turnspeed_ktas
-        CDmin = self.performance.CDmin
-        CLmax = self.performance.CLmax
-        CLminD = self.performance.CLminD
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        stloadfactor = kwargs.get("stloadfactor", self.brief.stloadfactor)
+        turnalt_m = kwargs.get("turnalt_m", self.brief.turnalt_m)
+        turnspeed_ktas = kwargs.get("turnspeed_ktas", self.brief.turnspeed_ktas)
+        CDmin = kwargs.get("CDmin", self.performance.CDmin)
+        CLmax = kwargs.get("CLmax", self.performance.CLmax)
+        CLminD = kwargs.get("CLminD", self.performance.CLminD)
 
         # Determine the thrust and power lapse corrections
         turnspeed_mpstas = co.kts2mps(turnspeed_ktas)
         mach = turnspeed_mpstas / self.designatm.vsound_mps(turnalt_m)
         tcorr = self.propulsion.thrust(
-            mach=mach, altitude=turnalt_m, norm=True,
+            mach=mach, altitude_m=turnalt_m, norm=True,
             eta_prop=self.performance.eta_prop["turn"]
         )
-        if self.propulsion.type in ["piston", "turboprop"]:
+        if self.propulsion.type in ["piston", "turboprop", "electricmotor"]:
             pcorr = self.propulsion.shaftpower(
-                mach=mach, altitude=turnalt_m, norm=True
+                mach=mach, altitude_m=turnalt_m, norm=True
             ) * self.performance.eta_prop["turn"]
         else:
             pcorr = np.nan
@@ -1287,7 +1366,7 @@ class AircraftConcept:
 
         """
         # Recast as necessary
-        wingloading_pa = actools.recastasnpfloatarray(wingloading_pa)
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
 
         # Compute constraints
         constraint_fs = {
@@ -1318,7 +1397,8 @@ class AircraftConcept:
             xstall = self.cleanstall_WSmax
 
         # Choose between T/W and P/W, depending on propulsion system
-        type_is_power = self.propulsion.type in ["piston", "turboprop"]
+        type_is_power = \
+            self.propulsion.type in ["piston", "turboprop", "electricmotor"]
         if type_is_power:
             if weight_n:
                 ys = {k: v * weight_n for (k, v) in pws.items()}  # P [W]

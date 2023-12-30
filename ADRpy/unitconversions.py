@@ -252,3 +252,13 @@ def pa2lbfft2(pressure_pa):
 def lbfft22pa(pressure_lbft2):
     """Convert pressure from lbf(pound-force)/ft^2 to Pascal"""
     return pressure_lbft2 / 0.020885434273039
+
+
+def rpm2radps(rotationalspeed_rpm):
+    """Convert rotational speed from RPM to angular speed in radians/second"""
+    return rotationalspeed_rpm * (2 * sc.pi) / 60
+
+
+def radps2rpm(angularspeed_radps):
+    """Convert angular speed from radians/second to rotational speed in RPM"""
+    return angularspeed_radps * 60 / (2 * sc.pi)
