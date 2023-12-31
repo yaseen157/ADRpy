@@ -6,20 +6,37 @@ from ADRpy import atmospheres as at
 
 
 def Cirrus_SR22():
-    """Returns an AircraftConcept object of the Cirrus SR22."""
+    """
+    Returns an AircraftConcept object of the Cirrus SR22.
+
+    References:
+        -   http://servicecenters.cirrusdesign.com/tech_pubs/SR2X/pdf/POH/SR22-004/pdf/Online13772-004.pdf
+        -   Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
+            and Procedures", Butterworth-Heinemann, 2013.
+    """
+    # The POH does not recommend exceeding 60 degrees of bank
     nturn = 1 / np.cos(
         np.radians(60))  # Approx. load factor for 60 degrees of bank
 
+    # There are two stall speeds for MTOW clean-config, depending on CG
+    VS_CG_FWD_kcas = 73
+    VS_CG_AFT_kcas = 70
+    # Clearly we are looking for limiting constraints, so take the minimum
+    vstall_kcas = min(VS_CG_FWD_kcas, VS_CG_AFT_kcas)
+
     designbrief = {
-        "rwyelevation_m": 0.0, "groundrun_m": co.feet2m(1_082),  # Take-off
-        "turnalt_m": 0, "turnspeed_ktas": 101, "stloadfactor": nturn,
+        # Take-off
+        "rwyelevation_m": 0.0, "groundrun_m": co.feet2m(1_082),
         # Sustained turn
-        "climbalt_m": 0, "climbspeed_kias": 108, 'climbrate_fpm': 1_251,
+        "turnalt_m": 0, "turnspeed_ktas": 101, "stloadfactor": nturn,
         # Climb
-        "cruisealt_m": co.feet2m(10e3), "cruisespeed_ktas": 182,  # Cruise
-        "servceil_m": co.feet2m(20_125), "secclimbspd_kias": 95,
+        "climbalt_m": 0, "climbspeed_kias": 108, 'climbrate_fpm': 1_251,
+        # Cruise
+        "cruisealt_m": co.feet2m(10e3), "cruisespeed_ktas": 182,
         # Service Ceiling
-        "vstallclean_kcas": 73  # Stall
+        "servceil_m": co.feet2m(20e3), "secclimbspd_kias": 90,
+        # Stall, 1g
+        "vstallclean_kcas": vstall_kcas
     }
 
     designdefinition = {

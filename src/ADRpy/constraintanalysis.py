@@ -224,21 +224,22 @@ def get_default_concept_design_objects():
 
 ACbrief, ACdefinition, ACperformance = get_default_concept_design_objects()
 
-dict_acbrief = typing.TypedDict(
+# Try to make type hints about what should go in each dictionary
+dict_acbrief = typing.Union[typing.TypedDict(
     "dict_acbrief",
     {**ACbrief.__annotations__},
     total=False
-)
-dict_acdefinition = typing.TypedDict(
+), dict]
+dict_acdefinition = typing.Union[typing.TypedDict(
     "dict_acdefinition",
     {**ACbrief.__annotations__},
     total=False
-)
-dict_acperformance = typing.TypedDict(
+), dict]
+dict_acperformance = typing.Union[typing.TypedDict(
     "dict_acperformance",
     {**ACbrief.__annotations__},
     total=False
-)
+), dict]
 
 
 class AircraftConcept:
@@ -475,6 +476,60 @@ class AircraftConcept:
 
         return
 
+    def ground_influence_coefficient(self, wingloading_pa, altitude_m=None, *,
+                                     method: str = None) -> np.ndarray:
+        """
+        Estimate the ground influence coefficient phi, which is the
+        multiplicative factor by which lift-induced drag reduces due to being
+        in-ground effect. (CDi)_IGE = phi * (CDi)_OGE.
+
+        Args:
+            wingloading_pa: Aircraft MTOW wing loading, in Pascal.
+            altitude_m: Geopotential altitude, in metres. Optional, defaults to
+                sea-level (0 metres).
+            method: Users may select any of:
+                "Wieselberger"; "Asselin"; "McCormick";
+
+        Returns:
+            Estimate for the ground influence coefficient, phi.
+
+        References:
+            Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
+            and Procedures," 1st ed., Elselvier, 2014. Section 9.5.8 on Ground
+            Effect.
+
+        """
+        # Recast as necessary
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        altitude_m = 0 if altitude_m is None else altitude_m
+        altitude_m = recastasnpfloatarray(altitude_m)
+        method = "McCormick" if method is None else method
+
+        # Get wing span
+        aspectratio = self.design.aspectratio
+        weight_n = self.design.weight_n
+
+        S_m2 = wingloading_pa * weight_n
+        b_sq = S_m2 * aspectratio
+
+        if method == "Wieselberger":
+            h_over_b = altitude_m / b_sq ** 0.5
+            phi = 1 - (1 - 1.32 * h_over_b) / (1.05 + 7.4 * h_over_b)
+
+        elif method == "McCormick":
+            h_over_b_allsq = altitude_m ** 2 / b_sq
+            num = 256 * h_over_b_allsq
+            phi = num / (1 + num)
+
+        elif method == "Asselin":
+            h_over_b = altitude_m / b_sq ** 0.5
+            phi = 1 - 2 / np.pi ** 2 * np.log(1 + np.pi / 8 / h_over_b)
+
+        else:
+            raise ValueError(f"Invalid selection {method=}. Try 'McCormick'?")
+
+        return phi
+
     def cdi_factor(self, **kwargs):
         """
         Estimate the induced drag factor (as in CD = CD_0 + k * CL^2).
@@ -482,11 +537,12 @@ class AircraftConcept:
         Keyword Args:
             mach: Freestream Mach number.
             method: Users may select any of:
-                ``"Cavallo"``, for Oswald span efficiency, e0;
-                ``"Brandt"``, for inviscid span efficiency, e;
-                ``"Nita-Scholz"``, for Oswald span efficiency, e0=f(M);
-                ``"Obert"``, for Oswald span efficiency, e0;
-                ``"Kroo"``, for Oswald span efficiency, e0;
+                "Cavallo", for Oswald span efficiency, e0;
+                "Brandt", for inviscid span efficiency, e;
+                "Nita-Scholz", for Oswald span efficiency, e0=f(M);
+                "Obert", for Oswald span efficiency, e0;
+                "Kroo", for Oswald span efficiency, e0;
+                "Douglas," for Oswald span efficiency, e0;
 
         Returns:
             Estimate for induced drag factor, k.
@@ -516,9 +572,12 @@ class AircraftConcept:
         mach = kwargs.get("mach", 0.3)
         method = kwargs.get("method", "Nita-Scholz")
 
+        # Get wing aspect ratio (basically everything uses it)
+        aspectratio = self.design.aspectratio
+        piAR = np.pi * aspectratio
+
         if method == "Cavallo":
-            # Find leading edge sweep and wing aspect ratio
-            aspectratio = self.design.aspectratio
+            # Find leading edge sweep
             sweep = np.radians(self.design.sweep_le_deg)
 
             # Compute Oswald span efficiency estimate
@@ -528,25 +587,23 @@ class AircraftConcept:
             wt = np.interp(sweep, [0, np.radians(30)], [1, 0])
             e0_mixed = wt * e0_straight + (1 - wt) * e0_swept
 
-            cdi_factor = 1 / (np.pi * e0_mixed * aspectratio)
+            cdi_factor = 1 / (e0_mixed * piAR)
 
         elif method == "Brandt":
             # THIS IS ACTUALLY THE SPAN EFFICIENCY FACTOR!!!
-            # Find maximum thickness sweep and wing aspect ratio
-            aspectratio = self.design.aspectratio
+            # Find maximum thickness sweep
             sweep = np.radians(self.design.sweep_mt_deg)
 
             # Compute Oswald span efficiency estimate
             sqrtterm = 4 + aspectratio ** 2 * (1 + (np.tan(sweep)) ** 2)
             e0_estimate = 2 / (2 - aspectratio + np.sqrt(sqrtterm))
 
-            cdi_factor = 1 / (np.pi * e0_estimate * aspectratio)
+            cdi_factor = 1 / (e0_estimate * piAR)
 
         elif method == "Nita-Scholz":
-            # Find quarter chord sweep, wing taper ratio, and aspect ratio
+            # Find quarter chord sweep, wing taper ratio
             sweep = self.design.sweep_25_deg
             taperratio = self.design.taperratio
-            aspectratio = self.design.aspectratio
 
             # Calculate Hoerner's delta/AR factor for unswept wings (with NASA's
             # swept wing study, fitted for c=25% sweep)
@@ -565,8 +622,8 @@ class AircraftConcept:
 
             # CORRECTION FACTOR F: Kroo's correction factor due to reduced lift
             # from fuselage presence (assumed fuselage diam. / span = 11.4%)
-            dfoverb_all = 0.114
-            ke_fuse = 1 - 2 * (dfoverb_all ** 2)
+            dfuse_b = 0.114
+            ke_fuse = 1 - 2 * (dfuse_b ** 2)
 
             # CORRECTION FACTOR D0: Correction factor due to viscous drag from
             # generated lift
@@ -581,26 +638,51 @@ class AircraftConcept:
 
             e0_estimate = np.clip(e_theo * ke_fuse * ke_d0 * ke_mach, 0, None)
 
-            cdi_factor = 1 / (np.pi * e0_estimate * aspectratio)
+            cdi_factor = 1 / (e0_estimate * piAR)
 
         elif method == "Obert":
-            # Find the aspect ratio
-            aspectratio = self.design.aspectratio
 
             e0_estimate = 1 / (1.05 + 0.007 * np.pi * aspectratio)
 
-            cdi_factor = 1 / (np.pi * e0_estimate * aspectratio)
+            cdi_factor = 1 / (e0_estimate * piAR)
 
         elif method == "Kroo":
-            # Find the inviscid induced drag factor, aspect ratio, and CDmin
-            cdi_inviscid = self.cdi_factor(method="Brandt")
-            aspectratio = self.design.aspectratio
+            # Find CDmin
             CDmin = self.performance.CDmin
 
+            # Inviscid induced drag factor (kept in efficiency form)
+            u = 0.99
+            s = 0.975  # from s = 1 - 2 * (d_fuselage / b) ** 2, ratio of 11.2%
+            e_inviscid = u * s
+
+            # Viscous induced drag factor
             K = 0.38
+            CDi_viscous_factor = K * CDmin
+
+            # Oswald span efficiency from conflating CD = CDmin + k * CL^2
+            # ---with--- CD = CDmin + CL^2/pi/e_inv/AR + K * CDmin * CL^2
             piAR = np.pi * aspectratio
-            e_inviscid = 1 / piAR / cdi_inviscid
-            e0_estimate = 1 / (1 / e_inviscid + K * CDmin * piAR)
+            e0_estimate = 1 / (1 / e_inviscid + piAR * CDi_viscous_factor)
+
+            cdi_factor = 1 / e0_estimate / piAR
+
+        elif method == "Douglas":
+            # This method was described in S. Gudmundsson and came from someone
+            # called Shevell, who based the formula on unpublished stuff from
+            # the Douglas aircraft company
+
+            # Find CDmin and leading edge sweep
+            CDmin = self.performance.CDmin
+            sweep = self.design.sweep_le_deg
+
+            dfuse_b = 0.114  # Take Nita-Scholz guess for fuselage diam. to span
+            u = 0.985  # Correction due to non-elliptical planform u~[0.98,1.00]
+            r = 0.38 - sweep / 3e3 + sweep ** 2 / 15e3  # Parasitic correction
+
+            e0_estimate = 1 / (
+                    piAR * r * CDmin
+                    + 1 / ((1 + 0.03 * dfuse_b - 2 * dfuse_b ** 2) * u)
+            )
 
             cdi_factor = 1 / e0_estimate / piAR
 
@@ -618,7 +700,8 @@ class AircraftConcept:
 
         Args:
             wingloading_pa: Aircraft wing loading, in Pascal.
-            altitude_m: Geopotential altitude, in metres.
+            altitude_m: Geopotential altitude, in metres. Optional, defaults to
+                sea-level (0 metres).
 
         Returns:
             Best speed for glide VBG, in metres per second.
@@ -655,7 +738,8 @@ class AircraftConcept:
 
         Args:
             wingloading_pa: Aircraft wing loading, in Pascal.
-            altitude_m: Geopotential altitude, in metres.
+            altitude_m: Geopotential altitude, in metres. Optional, defaults to
+                sea-level (0 metres).
 
         Returns:
             Best speed for jet range VCAR, in metres per second.
@@ -687,7 +771,8 @@ class AircraftConcept:
 
         Args:
             wingloading_pa: Aircraft wing loading, in Pascal.
-            altitude_m: Geopotential altitude, in metres.
+            altitude_m: Geopotential altitude, in metres. Optional, defaults to
+                sea-level (0 metres).
 
         Returns:
             Best climb angle speed VX, in metres per second.
@@ -1474,18 +1559,18 @@ class AircraftConcept:
 
         # Custom legend behaviour - allow user to redraw legend w/default posns!
         ax.legend()
-        # Squash the handles of legend handles shared by more than one label
-        handles, labels = ax.get_legend_handles_labels()
-        legenddict = {l: tuple(np.array(handles)[np.array(labels) == l])
-                      for l in labels}
-        legenddict = dict(zip(("labels", "handles"), zip(*legenddict.items())))
 
         def custom_legend_maker(**kwargs):
             """A matplotlib legend but with default position parameters."""
-            default_legend_kwargs = dict([
-                ("bbox_to_anchor", (1.05, 0.618)),
-                ("loc", "center left")
-            ])
+            # Squash the handles of legend handles shared by more than one label
+            handles, labels = ax.get_legend_handles_labels()
+            legenddict = {l: tuple(np.array(handles)[np.array(labels) == l])
+                          for l in labels}
+            legenddict = dict(
+                zip(("labels", "handles"), zip(*legenddict.items())))
+
+            default_legend_kwargs = dict(
+                [("bbox_to_anchor", (1.05, 0.618)), ("loc", "center left")])
             default_legend_kwargs.update(legenddict)
             return ax.legend(**{**default_legend_kwargs, **kwargs})
 
