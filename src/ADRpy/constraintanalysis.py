@@ -2,7 +2,7 @@
 This module contains tools for the constraint analysis of fixed wing aircraft.
 """
 import typing
-# import warnings
+import warnings
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -50,7 +50,7 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
         # Estimate point of switching to quadratic spline
         CLm = 0.5 * (_CLminD + _CLmax)
 
-        # Estimate the CDstall about 180% of the quadratic model
+        # Estimate a CDstall of about 180% of the quadratic model
         CDstall = 1.8 * quadratic_adjusted(
             _CDmin=_CDmin, _k=_k, CL=_CLmax, _CLminD=_CLminD)
 
@@ -121,26 +121,36 @@ def get_default_concept_design_objects():
             Args:
                 dictionary: key-value pairs with which to update default args.
             """
-            if dict is None:
+            if dictionary is None:
                 return
 
             for key, value in dictionary.items():
-                # If we already have a default value, overwrite it
-                if hasattr(self, key):
+                # If the key points to an attribute of self, set the new value
+                if key in self.__annotations__ or hasattr(self, key):
+
                     # A value that is type dict, should update the original dict
                     if isinstance(value, dict):
                         currentdict = getattr(self, key)
                         setattr(self, key, {**currentdict, **value})
                     else:
                         setattr(self, key, value)
-                # There is no default value, but the parameter exists, so set it
-                elif hasattr(self, "__annotations__") and (
-                        key in self.__annotations__):
-                    setattr(self, key, value)
+
+                # The key didn't exist for self
                 else:
                     errormsg = f"Unknown {key=} for {type(self).__name__}"
                     raise KeyError(errormsg)
             return
+
+        def __getattr__(self, item):
+            # If the item requested is supposed to exist for this object,
+            # but hasn't yet been given a value - return this default value
+            if item in self.__annotations__:
+                warnmsg = f"Concept's '{item}' attribute is undefined"
+                warnings.warn(warnmsg, RuntimeWarning)
+                return None
+
+            # Default behaviour
+            super().__getattribute__(item)
 
     class DesignBrief(BaseMethods):
         """Parameters of the aircraft design brief."""
@@ -183,18 +193,22 @@ def get_default_concept_design_objects():
         def __init__(self, definition: dict):
             super().__init__(dictionary=definition)
 
-            if not hasattr(self, "sweep_mt_deg"):
-                self.sweep_mt_deg = self.sweep_le_deg
+            # Skip the warnings from trying to access undefined attributes
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
 
-            if not hasattr(self, "sweep_25_deg"):
-                self.sweep_25_deg = (
-                        (2 / 7) * self.sweep_le_deg + (
-                        5 / 7) * self.sweep_mt_deg)
+                if self.sweep_mt_deg is None:
+                    self.sweep_mt_deg = self.sweep_le_deg
 
-            if not hasattr(self, "taperratio"):
-                # Optimal root taper ratio (if one is not provided)
-                # https://www.fzt.haw-hamburg.de/pers/Scholz/OPerA/OPerA_PRE_DLRK_12-09-10_MethodOnly.pdf
-                self.taperratio = 0.45 * np.exp(-0.0375 * self.sweep_25_deg)
+                if self.sweep_25_deg is None:
+                    self.sweep_25_deg = (
+                            (2 / 7) * self.sweep_le_deg + (
+                            5 / 7) * self.sweep_mt_deg)
+
+                if self.taperratio is None:
+                    # Optimal root taper ratio (if one is not provided)
+                    # https://www.fzt.haw-hamburg.de/pers/Scholz/OPerA/OPerA_PRE_DLRK_12-09-10_MethodOnly.pdf
+                    self.taperratio = 0.45 * np.exp(-0.0375 * self.sweep_25_deg)
 
     class DesignPerformance(BaseMethods):
 
@@ -511,7 +525,44 @@ class AircraftConcept:
 
         return phi
 
-    def cdi_factor(self, **kwargs):
+    def CLslope(self, *, method: str = None, **kwargs):
+        """
+        Estimate the lift-curve slope of the aircraft's main wing.
+
+        Returns:
+            The 3D lift slope of the main wing, CLalpha (per radian).
+
+        """
+        method = "Helmbold" if method is None else method
+
+        aspectratio = self.design.aspectratio
+        mach = recastasnpfloatarray(kwargs.get("mach", 0.3))
+
+        if method == "Helmbold":
+            num = 2 * np.pi * aspectratio
+            den = 2 + (aspectratio ** 2 + 4) ** 0.5
+            CLalpha = num / den
+
+        elif method == "DATCOM":
+            # Get 50% sweep (assume it's the same as the maxthickness sweep)
+            sweep = np.radians(self.design.sweep_mt_deg)
+
+            beta = (1 - mach ** 2) ** 0.5  # Prandtl-Glauert correction
+            kappa = 1.0
+
+            num = 2 * np.pi * aspectratio
+            ARfactor = (aspectratio * beta / kappa) ** 2
+            sweepfactor = (1 + (np.tan(sweep) / beta) ** 2)
+            den = 2 + (ARfactor * sweepfactor + 4) ** 0.5
+
+            CLalpha = num / den
+
+        else:
+            raise ValueError(f"Invalid selection {method=}. Try 'DATCOM'?")
+
+        return CLalpha
+
+    def cdi_factor(self, *, method: str = None, **kwargs):
         """
         Estimate the induced drag factor (as in CD = CD_0 + k * CL^2).
 
@@ -550,8 +601,8 @@ class AircraftConcept:
 
         """
         # Recast as necessary
-        mach = kwargs.get("mach", 0.3)
-        method = kwargs.get("method", "Nita-Scholz")
+        mach = recastasnpfloatarray(kwargs.get("mach", 0.3))
+        method = "Nita-Scholz" if method is None else method
 
         # Get wing aspect ratio (basically everything uses it)
         aspectratio = self.design.aspectratio
@@ -612,12 +663,22 @@ class AircraftConcept:
 
             # CORRECTION FACTOR M: Correction factor due to compressibility
             # effects on induced drag - constants from statistical analysis
-            if mach > 0.3:
-                ke_mach = -0.001521 * (((mach / 0.3) - 1) ** 10.82) + 1
-            else:
-                ke_mach = 1
+            with warnings.catch_warnings():
+                # Ignore expected warnings for invalid power when mach <= 0.3,
+                # because NumPy evaluates for all inputs even if it doesn't end
+                # up using the elements of that array in the output
+                warnings.simplefilter("ignore")
+                ke_mach = np.where(
+                    mach <= 0.3,
+                    1.0, -0.001521 * (((mach / 0.3) - 1) ** 10.82) + 1)
 
             e0_estimate = np.clip(e_theo * ke_fuse * ke_d0 * ke_mach, 0, None)
+            if (e0_estimate == 0).any():
+                warnmsg = (
+                    f"Estimate for Oswald span efficiency hit 0%. Perhaps the "
+                    f"Mach number is too high? (got {np.amax(mach)=:.3f})"
+                )
+                warnings.warn(warnmsg, RuntimeWarning)
 
             cdi_factor = 1 / (e0_estimate * piAR)
 
@@ -1013,7 +1074,7 @@ class AircraftConcept:
         requirements to climb as prescribed in the design brief for the concept.
 
         Args:
-            wingloading_pa: Wing loading, in Pascal.
+            wingloading_pa: MTOW wing loading, in Pascal.
 
         Returns:
             A tuple of (T/W_required, P/W_required). If the brief is completely
@@ -1035,6 +1096,7 @@ class AircraftConcept:
         CDmin = kwargs.get("CDmin", self.performance.CDmin)
         CLmax = kwargs.get("CLmax", self.performance.CLmax)
         CLminD = kwargs.get("CLminD", self.performance.CLminD)
+        methods = kwargs.get("methods", dict())
 
         # Determine the thrust and power lapse corrections
         climbspeed_mpsias = co.kts2mps(climbspeed_kias)
@@ -1062,7 +1124,7 @@ class AircraftConcept:
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=climbspeed_mpstas, altitude_m=climbalt_m)
         ws_pa = wingloading_pa * wcorr
-        wslim_pa = np.inf if CLmax is None else CLmax * q_pa
+        wslim_pa = CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             # warnings.warn(warnmsg, RuntimeWarning)
@@ -1075,7 +1137,7 @@ class AircraftConcept:
         cos_theta = (1 - (climbrate_mpstroc / climbspeed_mpstas) ** 2) ** 0.5
 
         # ... coefficient of drag
-        k = self.cdi_factor(mach=mach, method="Nita-Scholz")
+        k = self.cdi_factor(mach=mach, method=methods.get("cdi_factor"))
         f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
         CL = ws_pa * cos_theta / q_pa
         CD = f_CD(CL)
@@ -1087,7 +1149,7 @@ class AircraftConcept:
         tw = (
                      q_pa * CD / ws_pa
                      + Ka * climbrate_mpstroc / climbspeed_mpstas
-             ) / tcorr
+             ) / tcorr * wcorr
 
         # ... P/W (mapped to sea-level static)
         pw = (tw * tcorr) * climbspeed_mpstas / pcorr
@@ -1101,7 +1163,7 @@ class AircraftConcept:
         concept.
 
         Args:
-            wingloading_pa: Wing loading, in Pascal.
+            wingloading_pa: MTOW wing loading, in Pascal.
 
         Returns:
             A tuple of (T/W_required, P/W_required). If the brief is completely
@@ -1124,6 +1186,7 @@ class AircraftConcept:
         CDmin = kwargs.get("CDmin", self.performance.CDmin)
         CLmax = kwargs.get("CLmax", self.performance.CLmax)
         CLminD = kwargs.get("CLminD", self.performance.CLminD)
+        methods = kwargs.get("methods", dict())
 
         # Determine the thrust and power lapse corrections
         cruisespeed_mpstas = co.kts2mps(cruisespeed_ktas)
@@ -1147,20 +1210,20 @@ class AircraftConcept:
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=cruisespeed_mpstas, altitude_m=cruisealt_m)
         ws_pa = wingloading_pa * wcorr
-        wslim_pa = np.inf if CLmax is None else CLmax * q_pa
+        wslim_pa = CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... coefficient of drag
-        k = self.cdi_factor(mach=mach, method="Nita-Scholz")
+        k = self.cdi_factor(mach=mach, method=methods.get("cdi_factor"))
         f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
         CL = ws_pa / q_pa
         CD = f_CD(CL)
 
         # ... T/W (mapped to sea-level static)
-        tw = (q_pa * CD / ws_pa) / tcorr
+        tw = (q_pa * CD / ws_pa) / tcorr * wcorr
 
         # ... P/W (mapped to sea-level static)
         pw = (tw * tcorr) * cruisespeed_mpstas / pcorr
@@ -1174,7 +1237,7 @@ class AircraftConcept:
         brief for the concept.
 
         Args:
-            wingloading_pa: Wing loading, in Pascal.
+            wingloading_pa: MTOW wing loading, in Pascal.
 
         Returns:
             A tuple of (T/W_required, P/W_required). If the brief is completely
@@ -1195,6 +1258,7 @@ class AircraftConcept:
         CDmin = kwargs.get("CDmin", self.performance.CDmin)
         CLmax = kwargs.get("CLmax", self.performance.CLmax)
         CLminD = kwargs.get("CLminD", self.performance.CLminD)
+        methods = kwargs.get("methods", dict())
 
         # Determine the thrust and power lapse corrections
         secclimbspd_mpsias = co.kts2mps(secclimbspd_kias)
@@ -1222,7 +1286,7 @@ class AircraftConcept:
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=secclimbspd_mpstas, altitude_m=servceil_m)
         ws_pa = wingloading_pa * wcorr
-        wslim_pa = np.inf if CLmax is None else CLmax * q_pa
+        wslim_pa = CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             # warnings.warn(warnmsg, RuntimeWarning)
@@ -1238,7 +1302,7 @@ class AircraftConcept:
         cos_theta = (1 - (climbrate_mpstroc / secclimbspd_mpstas) ** 2) ** 0.5
 
         # ... coefficient of drag
-        k = self.cdi_factor(mach=mach, method="Nita-Scholz")
+        k = self.cdi_factor(mach=mach, method=methods.get("cdi_factor"))
         f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
         CL = ws_pa * cos_theta / q_pa
         CD = f_CD(CL)
@@ -1247,7 +1311,7 @@ class AircraftConcept:
         tw = (
                      q_pa * CD / ws_pa
                      + climbrate_mpstroc / secclimbspd_mpstas
-             ) / tcorr
+             ) / tcorr * wcorr
 
         # ... P/W (mapped to sea-level static)
         pw = (tw * tcorr) * secclimbspd_mpstas / pcorr
@@ -1261,7 +1325,7 @@ class AircraftConcept:
         the concept.
 
         Args:
-            wingloading_pa: Wing loading, in Pascal.
+            wingloading_pa: MTOW wing loading, in Pascal.
 
         Returns:
             A tuple of (T/W_required, P/W_required). If the brief is completely
@@ -1283,14 +1347,18 @@ class AircraftConcept:
         mu_R = kwargs.get("mu_R", self.performance.mu_R)
         CLTO = kwargs.get("CLTO", self.performance.CLTO)
         CLmaxTO = kwargs.get("CLmaxTO", self.performance.CLmaxTO)
+        methods = kwargs.get("methods", dict())
 
         # ... coefficient of drag
-        k = self.cdi_factor(method="Nita-Scholz")
+        k = self.cdi_factor(method=methods.get("cdi_factor"))
         f_CD = make_modified_drag_model(CDmin, k, CLmaxTO, CLminD)
         CDTO_OGE = f_CD(CLTO)
 
         # Correct CDTO using ground effect with a wing height of 2 m.
-        phi = self.ground_influence_coefficient(wingloading_pa, h_m=2)
+        phi = self.ground_influence_coefficient(
+            wingloading_pa, h_m=2,
+            method=methods.get("ground_influence_coefficient")
+        )
         # ... Assume CDminTO ~ CDmin, ground effect only affects induced drag
         CDTO_IGE = CDmin + phi * (CDTO_OGE - CDmin)
 
@@ -1325,12 +1393,11 @@ class AircraftConcept:
         # ... T/W (mapped to sea-level static)
         acctakeoffbar = vliftoff_mps ** 2 / 2 / groundrun_m
         tw_penalty = np.where(mu_R > CDTO_IGE / CLTO, mu_R, CDTO_IGE / CLTO)
-        tw = (acctakeoffbar / constants.g + tw_penalty) / tcorr
+        tw = (acctakeoffbar / constants.g + tw_penalty) / tcorr * wcorr
 
         # ... P/W (mapped to sea-level static)
-        # Not sure if using vliftoff here is correct, but since in most cases
-        # we expect CDTO_IGE / CLTO >= mu_R, I think it will work anyway?
-        pw = (tw * tcorr) * vliftoff_mps / pcorr
+        # Not sure if using vbar_mpstas is correct, but we used it for thrust???
+        pw = (tw * tcorr) * vbar_mpstas / pcorr
 
         return tw, pw
 
@@ -1341,7 +1408,7 @@ class AircraftConcept:
         design brief for the concept.
 
         Args:
-            wingloading_pa: Wing loading, in Pascal.
+            wingloading_pa: MTOW wing loading, in Pascal.
 
         Returns:
             A tuple of (T/W_required, P/W_required). If the brief is completely
@@ -1362,6 +1429,7 @@ class AircraftConcept:
         CDmin = kwargs.get("CDmin", self.performance.CDmin)
         CLmax = kwargs.get("CLmax", self.performance.CLmax)
         CLminD = kwargs.get("CLminD", self.performance.CLminD)
+        methods = kwargs.get("methods", dict())
 
         # Determine the thrust and power lapse corrections
         turnspeed_mpstas = co.kts2mps(turnspeed_ktas)
@@ -1385,20 +1453,20 @@ class AircraftConcept:
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=turnspeed_mpstas, altitude_m=turnalt_m)
         ws_pa = wingloading_pa * wcorr
-        wslim_pa = np.inf if CLmax is None else CLmax * q_pa
+        wslim_pa = CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
             # warnings.warn(warnmsg, RuntimeWarning)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... coefficient of drag
-        k = self.cdi_factor(mach=mach, method="Nita-Scholz")
+        k = self.cdi_factor(mach=mach, method=methods.get("cdi_factor"))
         f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
         CL = ws_pa * stloadfactor / q_pa
         CD = f_CD(CL)
 
         # ... T/W (mapped to sea-level static)
-        tw = (q_pa * CD / ws_pa) / tcorr
+        tw = (q_pa * CD / ws_pa) / tcorr * wcorr
 
         # ... P/W (mapped to sea-level static)
         pw = (tw * tcorr) * turnspeed_mpstas / pcorr
@@ -1447,7 +1515,7 @@ class AircraftConcept:
         s_m2 = weight_n / self.cleanstall_WSmax
         return s_m2
 
-    def plot_constraints(self, wingloading_pa):
+    def plot_constraints(self, wingloading_pa, **kwargs):
         """
         Make a pretty figure with all the constraints outlined in the design
         brief. Depending on the contents of the aircraft concept's brief,
@@ -1455,8 +1523,9 @@ class AircraftConcept:
         thrust, and power graphs are intelligently selected from.
 
         Args:
-            wingloading_pa: An ordered array of wing loading values across which
-                the concept's constraints should be evaluated.
+            wingloading_pa: An ordered array of MTOW wing loading values across
+                which the concept's constraints should be evaluated.
+            **kwargs: keyword arguments to pass onto the constraint methods.
 
         Returns:
             A tuple of the matplotlib (Figure, Axes) objects used to plot all
@@ -1478,7 +1547,7 @@ class AircraftConcept:
         for label, function in constraint_fs.items():
             try:
                 # noinspection PyArgumentList
-                tws[label], pws[label] = function(wingloading_pa)
+                tws[label], pws[label] = function(wingloading_pa, **kwargs)
             except (TypeError, RuntimeError) as _:
                 # tws[label] = np.nan * wingloading_pa
                 # pws[label] = np.nan * wingloading_pa

@@ -109,8 +109,11 @@ class CS23Amendment4:
         # Refactoring
         CLmax = self.concept.performance.CLmax
         CLmaxHL = np.nan
-        if hasattr(self.concept.performance, "CLmaxHL"):
-            CLmaxHL = self.concept.performance.CLmaxHL
+        # Skip the warnings from trying to access undefined attributes
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if self.concept.performance.CLmaxHL is not None:
+                CLmaxHL = self.concept.performance.CLmaxHL
         CLmin = self.concept.performance.CLmin
         designatm = self.concept.designatm
         funcs_ngminus1 = self.paragraph341_c_ngminus1
@@ -574,7 +577,7 @@ class CS23Amendment4:
 
         """
         # Clean, level flight stall speed VS from flight tests (use the brief)
-        if hasattr(self.concept.brief, "vstallclean_kcas"):
+        if self.concept.brief.vstallclean_kcas is not None:
             VS = self.concept.brief.vstallclean_kcas
         else:
             raise ValueError("'vstallclean_kcas' was not set!")
@@ -595,13 +598,16 @@ class CS23Amendment4:
         # --> VS0^2 * S_HL * CLmaxHL == VS1^2 * S * CLmax
         # --> VS0^2 == VS1^2 * (S / S_HL) * (CLmax / CLmaxHL)
 
-        if not hasattr(self.concept.performance, "CLmax"):
-            return np.nan
-        CLmax = self.concept.performance.CLmax
+        # Skip the warnings from trying to access undefined attributes
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if self.concept.performance.CLmax is None:
+                return np.nan
+            CLmax = self.concept.performance.CLmax
 
-        if not hasattr(self.concept.performance, "CLmaxHL"):
-            return np.nan
-        CLmaxHL = self.concept.performance.CLmaxHL
+            if self.concept.performance.CLmaxHL is None:
+                return np.nan
+            CLmaxHL = self.concept.performance.CLmaxHL
 
         # Assume that ratio of wing area to high-lift wing area (S / S_HL) is 1
         # for CS-23 aircraft --> (S / S_HL) == 1.0

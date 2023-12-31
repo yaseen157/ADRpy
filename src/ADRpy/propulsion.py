@@ -192,12 +192,12 @@ class EngineDeck:
         norm = True if norm else False
 
         # Compute thrust (and normalise to sea-level static if needed)
-        if self._f_thrust_SLTO is not NotImplemented:
-            thrust = self._f_thrust(mach, 0.0)
+        if self._f_thrust_SLTO is NotImplemented:
+            thrust = self.thrust(mach=mach, altitude_m=0.0, norm=norm)
+        else:
+            thrust = self._f_thrust_SLTO(mach, None)
             if norm is True:
                 thrust = thrust / self._f_thrust(np.zeros(1), np.zeros(1))
-        else:
-            thrust = self.thrust(mach=mach, altitude_m=0.0, norm=norm)
 
         return thrust
 
@@ -406,7 +406,8 @@ def xyz_interpolator(x: np.ndarray, y: typing.Union[np.ndarray, None],
     """
     # Recast as necessary
     if y is None:
-        x = np.clip(x, 0, None)
+        x[np.argmin(x)] = 0.0  # Force at least something to equal zero
+        x = np.clip(x, 0, None)  # Clip the rest to 0 and above
         _interp = interp1d(
             x, z, kind="cubic", bounds_error=False, fill_value=np.nan)
 
@@ -414,7 +415,9 @@ def xyz_interpolator(x: np.ndarray, y: typing.Union[np.ndarray, None],
             """Helper function, to ignore y for one dimensional z=f(x)."""
             return _interp(x)
     else:
-        xy = np.clip(np.vstack([x, y]), 0, None)  # x, y > 0
+        x[np.argmin(x)] = 0.0  # Force at least something to equal zero
+        y[np.argmin(y)] = 0.0  # Force at least something to equal zero
+        xy = np.clip(np.vstack([x, y]), 0, None)  # Clip the rest to 0 and above
         interp = CloughTocher2DInterpolator(xy.T, z)
 
     return interp
