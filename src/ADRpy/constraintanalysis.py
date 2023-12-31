@@ -199,8 +199,6 @@ def get_default_concept_design_objects():
     class DesignPerformance(BaseMethods):
 
         # Drag/resistance coefficients
-        CD0TO: float
-        CDTO: float
         CDmin = 0.03
         mu_R = 0.03
         # Lift coefficients
@@ -224,22 +222,13 @@ def get_default_concept_design_objects():
 
 ACbrief, ACdefinition, ACperformance = get_default_concept_design_objects()
 
-# Try to make type hints about what should go in each dictionary
-dict_acbrief = typing.Union[typing.TypedDict(
-    "dict_acbrief",
-    {**ACbrief.__annotations__},
-    total=False
-), dict]
-dict_acdefinition = typing.Union[typing.TypedDict(
-    "dict_acdefinition",
-    {**ACbrief.__annotations__},
-    total=False
-), dict]
-dict_acperformance = typing.Union[typing.TypedDict(
-    "dict_acperformance",
-    {**ACbrief.__annotations__},
-    total=False
-), dict]
+# Make type hints about what should go in each dictionary
+dict_acbrief = typing.TypedDict(
+    "dict_acbrief", {**ACbrief.__annotations__}, total=False)
+dict_acdefinition = typing.TypedDict(
+    "dict_acdefinition", {**ACdefinition.__annotations__}, total=False)
+dict_acperformance = typing.TypedDict(
+    "dict_acperformance", {**ACperformance.__annotations__}, total=False)
 
 
 class AircraftConcept:
@@ -377,14 +366,6 @@ class AircraftConcept:
             performance: Definition of key, high level design performance
                 estimates.
 
-                CD0TO
-                    Float. Zero-lift drag coefficient in the take-off
-                    configuration.
-
-                CDTO
-                    Float. Take-off drag coefficient. Optional, defaults to
-                    0.09.
-
                 CDmin
                     Float. Zero lift drag coefficient in clean configuration.
                     Optional, defaults to 0.03.
@@ -399,7 +380,7 @@ class AircraftConcept:
 
                 CLalpha
                     Float. The three-dimensional lift curve slope of the
-                    aircraft, per radian. Optional, defaults to CLalpha=5.2.
+                    aircraft, per radian. Optional, defaults to CLalpha of 5.2.
 
                 CLmax
                     Float. Maximum lift coefficient in flight, with the aircraft
@@ -476,7 +457,7 @@ class AircraftConcept:
 
         return
 
-    def ground_influence_coefficient(self, wingloading_pa, altitude_m=None, *,
+    def ground_influence_coefficient(self, wingloading_pa, h_m=None, *,
                                      method: str = None) -> np.ndarray:
         """
         Estimate the ground influence coefficient phi, which is the
@@ -485,8 +466,8 @@ class AircraftConcept:
 
         Args:
             wingloading_pa: Aircraft MTOW wing loading, in Pascal.
-            altitude_m: Geopotential altitude, in metres. Optional, defaults to
-                sea-level (0 metres).
+            h_m: Height of the wing above the ground, in metres. Optional,
+                defaults to slightly above ground-level (2 metres).
             method: Users may select any of:
                 "Wieselberger"; "Asselin"; "McCormick";
 
@@ -501,8 +482,8 @@ class AircraftConcept:
         """
         # Recast as necessary
         wingloading_pa = recastasnpfloatarray(wingloading_pa)
-        altitude_m = 0 if altitude_m is None else altitude_m
-        altitude_m = recastasnpfloatarray(altitude_m)
+        h_m = 2.0 if h_m is None else h_m
+        h_m = recastasnpfloatarray(h_m)
         method = "McCormick" if method is None else method
 
         # Get wing span
@@ -513,16 +494,16 @@ class AircraftConcept:
         b_sq = S_m2 * aspectratio
 
         if method == "Wieselberger":
-            h_over_b = altitude_m / b_sq ** 0.5
+            h_over_b = h_m / b_sq ** 0.5
             phi = 1 - (1 - 1.32 * h_over_b) / (1.05 + 7.4 * h_over_b)
 
         elif method == "McCormick":
-            h_over_b_allsq = altitude_m ** 2 / b_sq
+            h_over_b_allsq = h_m ** 2 / b_sq
             num = 256 * h_over_b_allsq
             phi = num / (1 + num)
 
         elif method == "Asselin":
-            h_over_b = altitude_m / b_sq ** 0.5
+            h_over_b = h_m / b_sq ** 0.5
             phi = 1 - 2 / np.pi ** 2 * np.log(1 + np.pi / 8 / h_over_b)
 
         else:
@@ -1297,10 +1278,21 @@ class AircraftConcept:
         wingloading_pa = recastasnpfloatarray(wingloading_pa)
         groundrun_m = kwargs.get("groundrun_m", self.brief.groundrun_m)
         rwyelevation_m = kwargs.get("rwyelevation_m", self.brief.rwyelevation_m)
-        CDTO = kwargs.get("CDTO", self.performance.CDTO)
+        CDmin = kwargs.get("CDmin", self.performance.CDmin)
+        CLminD = kwargs.get("CLminD", self.performance.CLminD)
         mu_R = kwargs.get("mu_R", self.performance.mu_R)
         CLTO = kwargs.get("CLTO", self.performance.CLTO)
         CLmaxTO = kwargs.get("CLmaxTO", self.performance.CLmaxTO)
+
+        # ... coefficient of drag
+        k = self.cdi_factor(method="Nita-Scholz")
+        f_CD = make_modified_drag_model(CDmin, k, CLmaxTO, CLminD)
+        CDTO_OGE = f_CD(CLTO)
+
+        # Correct CDTO using ground effect with a wing height of 2 m.
+        phi = self.ground_influence_coefficient(wingloading_pa, h_m=2)
+        # ... Assume CDminTO ~ CDmin, ground effect only affects induced drag
+        CDTO_IGE = CDmin + phi * (CDTO_OGE - CDmin)
 
         # Determine the weight lapse (relative to MTOW) correction
         wcorr = self.design.weightfractions["take-off"]
@@ -1313,7 +1305,8 @@ class AircraftConcept:
         vliftoff_mps = vrotate_mps
 
         # Determine the thrust and power lapse corrections
-        # (use a representative speed from centre of mass of the integral)
+        # 75% comes from taking the centre of mass of a V vs q diagram for when
+        # linear acceleration is assumed
         vbar_mpstas = 0.75 * vliftoff_mps
         machbar = vbar_mpstas / self.designatm.vsound_mps(rwyelevation_m)
         # (maybe we should use the altitude=0 sea-level take-off method below?)
@@ -1331,14 +1324,13 @@ class AircraftConcept:
         # Compute take-off constraint
         # ... T/W (mapped to sea-level static)
         acctakeoffbar = vliftoff_mps ** 2 / 2 / groundrun_m
-        tw = (
-                     acctakeoffbar / constants.g
-                     + 0.5 * CDTO / CLTO
-                     + 0.5 * mu_R
-             ) / tcorr
+        tw_penalty = np.where(mu_R > CDTO_IGE / CLTO, mu_R, CDTO_IGE / CLTO)
+        tw = (acctakeoffbar / constants.g + tw_penalty) / tcorr
 
         # ... P/W (mapped to sea-level static)
-        pw = (tw * tcorr) * vbar_mpstas / pcorr
+        # Not sure if using vliftoff here is correct, but since in most cases
+        # we expect CDTO_IGE / CLTO >= mu_R, I think it will work anyway?
+        pw = (tw * tcorr) * vliftoff_mps / pcorr
 
         return tw, pw
 
