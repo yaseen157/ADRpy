@@ -1938,7 +1938,7 @@ class AircraftConcept:
             yx1x2 = [0, ylim], xstall, xs.min() if weight_n else xs.max()
             clr = colours[len(constraint_fs)]
             l2d = ax.axvline(
-                xstall, label="clean stall, 1g", c=clr, zorder=10, lw=2)
+                xstall, label="clean stall, 1$g$", c=clr, zorder=10, lw=2)
             ax.fill_betweenx(*yx1x2, fc=l2d.get_color(), alpha=0.1, zorder=5)
 
         # Plot the stall limit due to all constraints
