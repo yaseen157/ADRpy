@@ -130,7 +130,7 @@ class CS23Amendment4:
             def keas2mpstas(keas):
                 """Convert knots EAS to m/s TAS."""
                 ktas = designatm.eas2tas(eas=keas, altitude_m=alt_m)
-                mpstas = uc.kts2mps(speed_kts=ktas)
+                mpstas = uc.kts_mps(speed_kts=ktas)
                 return mpstas
 
             # def mpstas2keas(mpstas):
@@ -412,7 +412,7 @@ class CS23Amendment4:
         fig.suptitle(f"{type(self).__name__} V-n Diagram")
         fig.subplots_adjust(left=0.165, bottom=0.2)
         axtitle = (f"Type(s): {', '.join(data)} | "
-                   f"MTOW: {uc.n2kg(self.concept.design.weight_n):.0f} [kg]")
+                   f"MTOW: {uc.N_kg(self.concept.design.weight_n):.0f} [kg]")
         ax.set_title(axtitle, fontsize="small")
 
         # ... manoeuvre and combined plots
@@ -504,7 +504,7 @@ class CS23Amendment4:
         output = self._new_categories_dict()
         # Item (1)
         weight_n = self.concept.design.weight_n
-        weight_lb = uc.n2lbf(weight_n)
+        weight_lb = uc.N_lbf(weight_n)
         output["normal"] = weight_lb <= 12_500
         output["utility"] = weight_lb <= 12_500
         output["aerobatic"] = weight_lb <= 12_500
@@ -560,7 +560,7 @@ class CS23Amendment4:
             return True
         elif propulsion_type == "piston":
             weight_n = self.concept.design.weight_n
-            weight_lb = uc.n2lbf(weight_n)
+            weight_lb = uc.N_lbf(weight_n)
             return weight_lb > 6_000
         elif propulsion_type in ["turbofan", "turbojet", "turboprop"]:
             return True
@@ -631,8 +631,8 @@ class CS23Amendment4:
         output = self._new_categories_dict()
 
         # Item (1)
-        kws = {"xp": (uc.feet2m(20e3), uc.feet2m(50e3)), "right": 0}
-        u50fps, u25fps, u13fps = uc.feet2m(50), uc.feet2m(25), uc.feet2m(12.5)
+        kws = {"xp": (uc.ft_m(20e3), uc.ft_m(50e3)), "right": 0}
+        u50fps, u25fps, u13fps = uc.ft_m(50), uc.ft_m(25), uc.ft_m(12.5)
 
         for (category, _) in output.items():
             output[category] = dict([
@@ -640,7 +640,7 @@ class CS23Amendment4:
                 ("D", partial(np.interp, **kws, fp=[u25fps, u13fps]))
             ])
 
-        u66fps, u38fps = uc.feet2m(66), uc.feet2m(38)
+        u66fps, u38fps = uc.ft_m(66), uc.ft_m(38)
         output["commuter"]["B"] = partial(np.interp, **kws, fp=[u66fps, u38fps])
 
         return output
@@ -663,7 +663,7 @@ class CS23Amendment4:
         # Items (1) and (2)
         W = self.concept.design.weight_n
         S = self.wingarea_m2
-        ws_lbfpft2 = uc.pa2lbfft2(W / S)
+        ws_lbfpft2 = uc.Pa_lbfft2(W / S)
 
         for (category, _) in output.items():
             factor = 36 if category == "aerobatic" else 33
@@ -721,7 +721,7 @@ class CS23Amendment4:
         VCmin_keas = self.paragraph335_a_VCmin
         W = self.concept.design.weight_n
         S = self.wingarea_m2
-        ws_lbfpft2 = uc.pa2lbfft2(W / S)
+        ws_lbfpft2 = uc.Pa_lbfft2(W / S)
 
         factors = {"utility": 1.50, "aerobatic": 1.55}
 
@@ -744,7 +744,7 @@ class CS23Amendment4:
 
         """
         # warnmsg = f"No method exists for kcas -> keas, assuming CAS ~ EAS"
-        # warnings.warn(warnmsg, RuntimeWarning)
+        # warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
         # Item (1)
         n1 = self.paragraph337_a_n1
         VS = self.paragraph49_b_VS1
@@ -775,7 +775,7 @@ class CS23Amendment4:
 
         """
         # warnmsg = f"No method exists for kcas -> keas, assuming CAS ~ EAS"
-        # warnings.warn(warnmsg, RuntimeWarning)
+        # warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
         # (W/S) = 0.5 * rho * V^2 * CL
         # ==> 2 * (W/S) / rho = V^2 * CL
         VS = self.paragraph49_b_VS1
@@ -861,7 +861,7 @@ class CS23Amendment4:
 
         # Item (1)
         weight_n = self.concept.design.weight_n
-        weight_lb = uc.n2lbf(weight_n)
+        weight_lb = uc.N_lbf(weight_n)
         n1 = np.clip(2.1 + 24_000 / (weight_lb + 10_000), 0, 3.8)
         output["normal"] = n1
         output["commuter"] = n1
@@ -928,7 +928,7 @@ class CS23Amendment4:
 
             def one_pm_this(keas, wingloading_pa, altitude_m, f_Ude):
                 """Gust load factor: n = 1 +/- 'one_pm_this(...)'."""
-                mpseas = uc.kts2mps(speed_kts=keas)
+                mpseas = uc.kts_mps(speed_kts=keas)
                 gustfactor = kg(wingloading_pa, altitude_m)
                 num = gustfactor * rho0 * f_Ude(altitude_m) * mpseas * CLalpha
                 den = 2 * wingloading_pa
@@ -987,7 +987,7 @@ if __name__ == "__main__":
 
     designdef = {
         "aspectratio": 10.48,
-        "weight_n": uc.lbf2n(17120)
+        "weight_n": uc.lbf_N(17120)
     }
 
     designperf = {
@@ -1007,7 +1007,7 @@ if __name__ == "__main__":
     )
 
     Beech1900Dcs23spec = CS23Amendment4(Beech1900Dconcept, "commuter",
-                                        uc.feet22m2(310))
+                                        uc.ft2_m2(310))
 
     fig, ax = Beech1900Dcs23spec.plot_Vn(weightfraction=0.7)
 

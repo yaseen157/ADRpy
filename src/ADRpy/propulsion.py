@@ -326,7 +326,7 @@ def build_deck(deck: EngineDeck) -> None:
             speed_RPM = df["Speed [RPM]"].to_numpy()
             torque_Nm = df["Torque [N m]"].to_numpy()
 
-            speed_radps = uc.rpm2radps(speed_RPM)
+            speed_radps = uc.RPM_rads(speed_RPM)
             power_w = torque_Nm * speed_radps
 
             # Take a representative power at 85th percentile
@@ -476,7 +476,7 @@ def TPratio(altitude_m: np.ndarray, atmosphere=None):
     atmosphere = isaref if atmosphere is None else atmosphere
 
     # Static quantity ratios (e.g. T / Tstd)
-    temp_K = uc.c2k(atmosphere.airtemp_c(altitude_m))
+    temp_K = uc.C_K(atmosphere.airtemp_c(altitude_m))
     theta = temp_K / 288.15  # static temperature ratio
     press_Pa = atmosphere.airpress_pa(altitude_m)
     delta = press_Pa / 101325  # static pressure ratio
@@ -1135,10 +1135,10 @@ class SuperchargedPiston(Piston):
         # Supercharged model constant has performance to at least 25k ft
         # ... work out the lapse the engines experience with density ratio
         lapse = sigma ** 0.765
-        slice0 = altitude_m > uc.feet2m(36_089)
+        slice0 = altitude_m > uc.ft_m(36_089)
         lapse[slice0] = 1.331 * sigma[slice0]  # requirement: sigma is an array!
         # ... offset the results to ensure constant performance below 25k ft
-        lapse25k = (atmosphere.airdens_kgpm3(uc.feet2m(25e3)) / 1.225) ** 0.765
+        lapse25k = (atmosphere.airdens_kgpm3(uc.ft_m(25e3)) / 1.225) ** 0.765
         lapse = np.clip(lapse + (1 - lapse25k), 0, 1.0)
 
         return lapse

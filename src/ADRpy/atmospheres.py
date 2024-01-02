@@ -210,13 +210,13 @@ class Runway:
             self.he_displaced_threshold_ft = 0
 
         # Metric versions of the imperial fields listed above
-        self.length_m = co.feet2m(self.length_ft)
-        self.width_m = co.feet2m(self.width_ft)
-        self.le_elevation_m = co.feet2m(self.le_elevation_ft)
-        self.le_displaced_threshold_m = co.feet2m(
+        self.length_m = co.ft_m(self.length_ft)
+        self.width_m = co.ft_m(self.width_ft)
+        self.le_elevation_m = co.ft_m(self.le_elevation_ft)
+        self.le_displaced_threshold_m = co.ft_m(
             self.le_displaced_threshold_ft)
-        self.he_elevation_m = co.feet2m(self.he_elevation_ft)
-        self.he_displaced_threshold_m = co.feet2m(
+        self.he_elevation_m = co.ft_m(self.he_elevation_ft)
+        self.he_displaced_threshold_m = co.ft_m(
             self.he_displaced_threshold_ft)
 
     def windcomponents(self, wind_dirs_deg: list[float],
@@ -365,7 +365,7 @@ class Atmosphere:
 
         >>> # Query altitude
         >>> altitude_ft = 38000
-        >>> altitude_m = co.feet2m(altitude_ft)
+        >>> altitude_m = co.ft_m(altitude_ft)
 
         >>> # Query the ambient density in this model at the specified altitude
         ... print(f"ISA-10C density at {str(altitude_ft)} feet (geopotential):",
@@ -776,7 +776,7 @@ class Atmosphere:
             The local speed of sound, in knots.
 
         """
-        return co.mps2kts(self.vsound_mps(altitude_m))
+        return co.mps_kts(self.vsound_mps(altitude_m))
 
     def airpress_mbar(self, altitude_m=0):
         """
@@ -790,7 +790,7 @@ class Atmosphere:
             The ambient air pressure, in millibar.
 
         """
-        return co.pa2mbar(self.airpress_pa(altitude_m))
+        return co.Pa_mbar(self.airpress_pa(altitude_m))
 
     def airtemp_c(self, altitude_m=0):
         """
@@ -803,7 +803,7 @@ class Atmosphere:
             The ambient air temperature, in degrees Celsius.
 
         """
-        return co.k2c(self.airtemp_k(altitude_m))
+        return co.K_C(self.airtemp_k(altitude_m))
 
     def dynamicpressure_pa(self, airspeed_mps=0, altitude_m=0):
         """
@@ -827,7 +827,7 @@ class Atmosphere:
             >>> altitudelist_m = [0, 500, 1000, 1500]
 
             >>> q_Pa = isa.dynamicpressure_pa(MPSTAS, altitudelist_m)
-            >>> q_mbar = co.pa2mbar(q_Pa)
+            >>> q_mbar = co.Pa_mbar(q_Pa)
             >>> print(q_mbar)
             [2.44999974 2.33453737 2.22328473 2.11613426]
 
@@ -920,7 +920,7 @@ class Atmosphere:
             >>> isa = Atmosphere()
 
             >>> keas = np.array([100, 200, 300])
-            >>> altitude_m = co.feet2m(40_000)
+            >>> altitude_m = co.ft_m(40_000)
 
             >>> kcas, mach = isa.keas2kcas(keas, altitude_m)
             >>> print(kcas)
@@ -929,9 +929,9 @@ class Atmosphere:
         """
         # Note: unit specific, as the calculation requires Mach no.
         np.asarray(keas)
-        mpseas = co.kts2mps(keas)
+        mpseas = co.kts_mps(keas)
         mpscas, machno = self.mpseas2mpscas(mpseas, altitude_m)
-        kcas = co.mps2kts(mpscas)
+        kcas = co.mps_kts(mpscas)
         return kcas, machno
 
 
@@ -970,9 +970,9 @@ def mil_hdbk_310(high_or_low: str, temp_or_dens: str, alt_km: int):
                 np.loadtxt(_fstr, skiprows=0, unpack=True)
 
         atm1pct = Obsprofile(
-            alt_m=co.km2m(alt_km), temp_k=t_1pct_k, rho_kgpm3=rho_1pct_kgpm3)
+            alt_m=co.km_m(alt_km), temp_k=t_1pct_k, rho_kgpm3=rho_1pct_kgpm3)
         atm10pct = Obsprofile(
-            alt_m=co.km2m(alt_km), temp_k=t_10pct_k, rho_kgpm3=rho_10pct_kgpm3)
+            alt_m=co.km_m(alt_km), temp_k=t_10pct_k, rho_kgpm3=rho_10pct_kgpm3)
 
         return atm1pct, atm10pct
 
@@ -1001,8 +1001,8 @@ def reciprocalhdg(heading_deg):
 
 def tempratio(temp_c, mach):
     """Ratio of total temperature and the standard SL temperature"""
-    temp_k = co.c2k(temp_c)
-    sealevelstdtmp_k = co.c2k(15.0)
+    temp_k = co.C_K(temp_c)
+    sealevelstdtmp_k = co.C_K(15.0)
     theta0 = (temp_k / sealevelstdtmp_k) * (
             1 + (mach ** 2) * (GAMMA_DRY_AIR - 1) / 2)
     return theta0

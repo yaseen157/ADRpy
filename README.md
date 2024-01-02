@@ -29,6 +29,7 @@
 
 ADRpy is an academic, teaching resource containing aircraft conceptual design
 and performance analysis tools such as:
+
 - Virtual (design) atmospheres
 - Constraint analysis methods
 - Propulsion system performance models
@@ -42,10 +43,11 @@ follow the instructions below.
 For video tutorials and explainers (a.k.a. *ADRpy Shorts*) scroll to the bottom
 of this page.
 
-Components of this library are written to be both easy to read and modify 
+Components of this library are written to be both easy to read and modify
 without requiring significant coding knowledge. Confident coders looking for a
 more flexible and expandable library architecture may wish to check out ADRpy's
-companion library [CARPy](https://github.com/yaseen157/carpy/tree/main) (currently a work in progress!).
+companion library [CARPy](https://github.com/yaseen157/carpy/tree/main) (
+currently a work in progress!).
 
 ---
 
@@ -59,37 +61,42 @@ On most systems you should be able to simply open an operating system terminal
 and at the command prompt type
 
     $ pip install -e ADRpy
-    
+
 or
 
     $ python -m pip install -e ADRpy
 
 NOTE: the `-e` flag is optional, but recommended. It makes the ADRpy install
-*editable*, allowing users to poke and prod the machinery of the library. 
+*editable*, allowing users to poke and prod the machinery of the library.
 
 NOTE: `pip` is a Python package; if it is not available on your system, download
-[get-pip.py](https://bootstrap.pypa.io/get-pip.py) and run it in Python by entering
+[get-pip.py](https://bootstrap.pypa.io/get-pip.py) and run it in Python by
+entering
 
     $ python get-pip.py
-    
+
 at the operating system prompt.
 
-An alternative approach to installing ADRpy is to clone the GitHub repository, by typing
+An alternative approach to installing ADRpy is to clone the GitHub repository,
+by typing
 
     $ git clone https://github.com/sobester/ADRpy.git
 
-at the command prompt and then executing the setup file in the same directory by entering:
+at the command prompt and then executing the setup file in the same directory by
+entering:
 
     $ python setup.py install
 
 ---
-    
+
 ## A 'hello world' example: atmospheric properties
 
-
-There are several options for running the examples shown here: you could copy and paste them 
-into a `.py` file, save it and run it in Python, or you could enter the lines, in sequence,
-at the prompt of a Python terminal. You could also copy and paste them into a Jupyter notebook
+There are several options for running the examples shown here: you could copy
+and paste them
+into a `.py` file, save it and run it in Python, or you could enter the lines,
+in sequence,
+at the prompt of a Python terminal. You could also copy and paste them into a
+Jupyter notebook
 (`.ipynb` file) cell and execute the cell.
 
 ```python
@@ -100,8 +107,8 @@ from ADRpy import unitconversions as co
 isa = at.Atmosphere(offset_deg=10)
 
 # Query the ambient density in this model at 41,000 feet 
-print("ISA+10C density at 41,000 feet (geopotential):", 
-      isa.airdens_kgpm3(co.feet2m(41000)), "kg/m^3")
+print("ISA+10C density at 41,000 feet (geopotential):",
+      isa.airdens_kgpm3(co.ft_m(41000)), "kg/m^3")
 ```
 
 You should see the following output:
@@ -166,31 +173,30 @@ You should see the following output:
     T/W (SL, static thrust): [0.32348606 0.44523742 0.56698878 0.68874015]
 
 ---
+
 ## More extensive examples - a library of notebooks
 
+To view them on GitHub, go
+to [ADRpy's notebooks folder](https://github.com/sobester/ADRpy/tree/master/docs/ADRpy/notebooks).
 
-To view them on GitHub, go to [ADRpy's notebooks folder](https://github.com/sobester/ADRpy/tree/master/docs/ADRpy/notebooks).
-
-Alternatively, grab the whole repository as a .zip by clicking the big, green 'Code' button at the top of this page. 
+Alternatively, grab the whole repository as a .zip by clicking the big, green '
+Code' button at the top of this page.
 
 ---
-## ADRpy Shorts - video tutorials and explainers
 
+## ADRpy Shorts - video tutorials and explainers
 
 **1. An Aircraft Engineer's Brief Introduction to Modelling the Atmosphere**
 
 [![1. An Aircraft Engineer's Brief Introduction to Modelling the Atmosphere](http://img.youtube.com/vi/II9vuVCgV-w/0.jpg)](http://www.youtube.com/watch?v=II9vuVCgV-w)
 
-
 **2. On V-n Diagrams and How to Build them in ADRpy**
 
 [![2. On V-n Diagrams and How to Build them in ADRpy](http://img.youtube.com/vi/s-d5z-BQovY/0.jpg)](http://www.youtube.com/watch?v=s-d5z-BQovY)
 
-
 **3. Speed in aviation - GS, WS, TAS, IAS, CAS and EAS**
 
 [![3. Speed in aviation - GS, WS, TAS, IAS, CAS and EAS](http://img.youtube.com/vi/WSzDXlTlXiI/0.jpg)](http://www.youtube.com/watch?v=WSzDXlTlXiI)
-
 
 **4. Wing and propulsion system sizing with ADRpy**
 

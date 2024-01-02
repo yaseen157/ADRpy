@@ -1,6 +1,8 @@
 """
 This module contains tools for the constraint analysis of fixed wing aircraft.
 """
+from functools import wraps
+import re
 import typing
 import warnings
 
@@ -17,7 +19,94 @@ __all__ = ["make_modified_drag_model", "AircraftConcept"]
 __author__ = "Yaseen Reza"
 
 
-def make_modified_drag_model(CDmin, k, CLmax, CLminD):
+def raise_bad_method_error(func):
+    """
+    A wrapper for functions that take "method" as a keyword argument.
+    The wrapper mines the function's docstring for what it thinks are valid
+    methods. If the function raises an exception, this wrapper tries to
+    identify it might have been because of a bad choice of method.
+
+    Args:
+        func: Function to wrap.
+
+    Returns:
+        Wrapped function.
+
+    """
+    # Attempt to extract valid methods from the method section of a docstring
+    methodname_pattern = r"""['"][A-z-]+,?['"]"""
+    methodsection = re.findall(
+        r"method:.+(?:\s+" + methodname_pattern + ".+\n)+", func.__doc__)
+
+    # If we couldn't find anything in the docstring that looks viable
+    if not methodsection:
+        raise ReferenceError("Couldn't find valid method definition(s)")
+    else:
+        methodsection, = methodsection
+
+    allowed_methods = set(re.findall(r"""["']([A-z-]+),?["']""", methodsection))
+
+    @wraps(func)
+    def with_method_checking(*args, **kwargs):
+        """Tell the user if they've made a mistake when choosing a method."""
+        try:
+            result = func(*args, **kwargs)
+        except Exception:
+            # Check if the fail was because of a bad method choice
+            if "method" in kwargs:
+                method = kwargs["method"]
+
+                # If user made invalid choice, tell user about allowed methods
+                if method not in allowed_methods:
+                    errormsg = (
+                        f"{method=} isn't a valid choice for {func.__name__}. "
+                        f"Please select any from {allowed_methods=}"
+                    )
+                    raise ValueError(errormsg)
+            # Otherwise, error couldn't be handled. Do default raise behaviour
+            raise
+        return result
+
+    return with_method_checking
+
+
+def revert2scalar(func):
+    @wraps(func)
+    def with_reverting(*args, **kwargs):
+        """Try to turn x into a scalar (if it is an array, list, or tuple)."""
+
+        # Evaluate the wrapped func
+        output = func(*args, **kwargs)
+
+        if not isinstance(output, tuple):
+            output = (output,)
+
+        # Convert all items in the output to scalar if possible
+        new_output = []
+        for x in output:
+            if isinstance(x, np.ndarray):
+                if x.ndim == 0:
+                    new_output.append(x.item())
+                    continue
+                if sum(x.shape) == 1:
+                    new_output.append(x[0])
+                    continue
+            elif isinstance(x, (list, tuple)):
+                if len(x) == 1:
+                    new_output.append(x[0])
+                    continue
+            new_output.append(x)
+
+        # If there was only one output from the function, return that as scalar
+        if len(new_output) == 1:
+            return new_output[0]
+
+        return tuple(new_output)
+
+    return with_reverting
+
+
+def make_modified_drag_model(CDmin, k, CLmax, CLminD) -> typing.Callable:
     """
     Return a function f, which computes the coefficient of drag as a function of
     the coefficient of lift, i.e. CD=f(CL).
@@ -67,6 +156,7 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
         ])
         A, B, C = np.linalg.solve(matA, matB)
 
+        @revert2scalar
         def drag_model(CL):
             """
             A modified, adjusted drag model.
@@ -89,7 +179,7 @@ def make_modified_drag_model(CDmin, k, CLmax, CLminD):
 
             if (CL > _CLmax).any():
                 # warnmsg = f"Coefficient of lift exceeded CLmax={_CLmax}"
-                # warnings.warn(warnmsg, category=RuntimeWarning)
+                # warnings.warn(warnmsg, category=RuntimeWarning, stacklevel=2)
                 CD[CL > _CLmax] = np.nan
 
             return CD
@@ -125,6 +215,7 @@ def get_default_concept_design_objects():
                 return
 
             for key, value in dictionary.items():
+
                 # If the key points to an attribute of self, set the new value
                 if key in self.__annotations__ or hasattr(self, key):
 
@@ -146,7 +237,7 @@ def get_default_concept_design_objects():
             # but hasn't yet been given a value - return this default value
             if item in self.__annotations__:
                 warnmsg = f"Concept's '{item}' attribute is undefined"
-                warnings.warn(warnmsg, RuntimeWarning)
+                warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
                 return None
 
             # Default behaviour
@@ -178,37 +269,256 @@ def get_default_concept_design_objects():
     class DesignDefinition(BaseMethods):
         """Parameters of the aircraft design definition."""
         # Geometry definitions
-        aspectratio = 8.0
-        sweep_le_deg = 0.0
+        aspectratio: float
+        sweep_le_deg: float
         sweep_mt_deg: float
         sweep_25_deg: float
         taperratio: float
         # Weight and loading
         weight_n: float = None
-        weightfractions = {
-            x: 1.0
-            for x in ["climb", "cruise", "servceil", "take-off", "turn"]
-        }
+        weightfractions = dict([
+            ("climb", 1.00), ("cruise", 1.00), ("servceil", 1.00),
+            ("take-off", 1.00), ("turn", 1.00)
+        ])
 
         def __init__(self, definition: dict):
+            """
+            Given design definition, resolve missing geometry in the wing.
+
+            Args:
+                definition: Design definition.
+            """
             super().__init__(dictionary=definition)
 
             # Skip the warnings from trying to access undefined attributes
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
+                # Refactoring
+                sLE_deg = self.sweep_le_deg
+                s25_deg = self.sweep_25_deg
+                sMT_deg = self.sweep_mt_deg
+                AR = self.aspectratio
+                TR = self.taperratio
 
-                if self.sweep_mt_deg is None:
-                    self.sweep_mt_deg = self.sweep_le_deg
+            notNone = lambda x: x is not None
+            isNone = lambda x: x is None
 
-                if self.sweep_25_deg is None:
-                    self.sweep_25_deg = (
-                            (2 / 7) * self.sweep_le_deg + (
-                            5 / 7) * self.sweep_mt_deg)
+            # Map has to be used twice because it's a consumable generator
+            if sum(map(notNone, [sLE_deg, s25_deg, sMT_deg, AR, TR])) > 3:
+                errormsg = (
+                    f"Wing geometry is overdefined. Consider removing a "
+                    f"reference to a sweep angle or aspect/taper ratio"
+                )
+                raise ValueError(errormsg)
+            elif sum(map(notNone, [sLE_deg, s25_deg, sMT_deg, AR, TR])) < 3:
+                warnmsg = \
+                    f"Wing geometry is underdefined. Filling in the gaps..."
+                warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
 
-                if self.taperratio is None:
-                    # Optimal root taper ratio (if one is not provided)
-                    # https://www.fzt.haw-hamburg.de/pers/Scholz/OPerA/OPerA_PRE_DLRK_12-09-10_MethodOnly.pdf
-                    self.taperratio = 0.45 * np.exp(-0.0375 * self.sweep_25_deg)
+            xcMT = 0.3  # <-- Assume location of max thickness
+            xcMT_from_LEsweep = lambda x: np.interp(x, [25, 60], [0.3, 0.5])
+
+            # While there are any undefined parameters
+            while any(map(isNone, [sLE_deg, s25_deg, sMT_deg, AR, TR])):
+
+                if notNone(TR) and TR < 0:
+                    errormsg = f"Got wing taper ratio < 0 ({TR=})"
+                    raise ValueError(errormsg)
+
+                # If taper and aspect ratio are known, we can work out sweep
+                if notNone(TR) and notNone(AR):
+                    # No angles are known
+                    if all(map(isNone, [sLE_deg, s25_deg, sMT_deg])):
+                        sMT_deg = 0.0  # <-- allows straight spar
+                        sLE_deg = self.sweep_m_deg(0.00, xcMT, sMT_deg)
+                        s25_deg = self.sweep_m_deg(0.25, xcMT, sMT_deg)
+                    # One angle is known
+                    elif all(map(isNone, [sLE_deg, s25_deg])):
+                        sLE_deg = self.sweep_m_deg(0.00, xcMT, sMT_deg)
+                        s25_deg = self.sweep_m_deg(0.25, xcMT, sMT_deg)
+                    elif all(map(isNone, [sLE_deg, sMT_deg])):
+                        sLE_deg = self.sweep_m_deg(0.00, 0.25, s25_deg)
+                        sMT_deg = self.sweep_m_deg(xcMT, 0.25, s25_deg)
+                    elif all(map(isNone, [s25_deg, sMT_deg])):
+                        s25_deg = self.sweep_m_deg(0.25, 0.00, sLE_deg)
+                        xcMT = xcMT_from_LEsweep(sLE_deg)
+                        sMT_deg = self.sweep_m_deg(xcMT, 0.00, sLE_deg)
+                    # Two angles are known
+                    elif isNone(sLE_deg):
+                        sLE_deg = self.sweep_m_deg(0.00, 0.25, s25_deg)
+                    elif isNone(s25_deg):
+                        s25_deg = self.sweep_m_deg(0.25, 0.00, sLE_deg)
+                    elif isNone(sMT_deg):
+                        xcMT = xcMT_from_LEsweep(sLE_deg)
+                        sMT_deg = self.sweep_m_deg(xcMT, 0.00, sLE_deg)
+                    # All angles are known
+                    else:
+                        break  # We win! planform is fully defined
+
+                # If only aspect ratio is known, find a taper ratio
+                elif isNone(TR) and notNone(AR):
+                    # No angles are known
+                    if not sLE_deg and not s25_deg and not sMT_deg:
+                        sMT_deg = 0.0  # <-- allows straight spar
+                        TR = 1.0
+                    # One angle is known
+                    elif all(map(isNone, [sLE_deg, s25_deg])):
+                        TR = 1.0
+                    elif all(map(isNone, [sLE_deg, sMT_deg])):
+                        # https://www.fzt.haw-hamburg.de/pers/Scholz/OPerA/OPerA_PRE_DLRK_12-09-10_MethodOnly.pdf
+                        TR = 0.45 * np.exp(-0.0375 * s25_deg)
+                    elif all(map(isNone, [s25_deg, sMT_deg])):
+                        TR = 1.0
+                    # Two angles are known
+                    elif isNone(sLE_deg):
+                        tn25, tnMT = np.tan(np.radians([s25_deg, sMT_deg]))
+                        factor = AR / 4 * (tn25 - tnMT) / (xcMT - tn25)
+                        TR = (1 - factor) / (1 + factor)
+                    elif isNone(s25_deg):
+                        tnLE, tnMT = np.tan(np.radians([sLE_deg, sMT_deg]))
+                        xcMT = xcMT_from_LEsweep(sLE_deg)
+                        factor = AR / 4 * (tnLE - tnMT) / (xcMT - 0)
+                        TR = (1 - factor) / (1 + factor)
+                    elif isNone(sMT_deg):
+                        tnLE, tn25 = np.tan(np.radians([sLE_deg, s25_deg]))
+                        factor = AR / 4 * (tnLE - tn25) / (0.25 - 0)
+                        TR = (1 - factor) / (1 + factor)
+                    # Failsafe: we shouldn't reach this if code above works
+                    else:
+                        raise RuntimeError("Couldn't resolve wing geometry")
+                    assert notNone(TR), "Bug: TR should've been defined here!"
+
+                # If the wing is rectangular and skewed, nothing to derive
+                elif isNone(AR) and notNone(TR) and TR == 1.0:
+                    # Set of angles should contain one element only
+                    set_of_angles = {sLE_deg, s25_deg, sMT_deg} - {None}
+                    if len({sLE_deg, s25_deg, sMT_deg} - {None}) == 1:
+                        sLE_deg, = set_of_angles
+                        s25_deg, = set_of_angles
+                        sMT_deg, = set_of_angles
+                    else:
+                        raise RuntimeError("Couldn't resolve wing geometry")
+
+                # If only taper ratio is known, find an aspect ratio
+                elif isNone(AR) and notNone(TR):
+                    # One or fewer angles are known
+                    if sum(map(notNone, [sLE_deg, s25_deg, sMT_deg])) <= 1:
+                        break
+                    # Two angles are known
+                    elif len({sLE_deg, s25_deg, sMT_deg} - {None}) == 1:
+                        # If angles aren't unique, it's impossible to get AR
+                        break  # ... i.e. the wing's chord is constant
+                    # Two *unique* angles are known
+                    elif isNone(sLE_deg):
+                        tn25, tnMT = np.tan(np.radians([sLE_deg, s25_deg]))
+                        num = 4 * (xcMT - 0.25) * (1 - TR) / (1 + TR)
+                        AR = num / (tn25 - tnMT)
+                    elif isNone(s25_deg):
+                        tnLE, tnMT = np.tan(np.radians([sLE_deg, s25_deg]))
+                        xcMT = xcMT_from_LEsweep(sLE_deg)
+                        num = 4 * (xcMT - 0.00) * (1 - TR) / (1 + TR)
+                        AR = num / (tnLE - tnMT)
+                    elif isNone(sMT_deg):
+                        tnLE, tn25 = np.tan(np.radians([sLE_deg, s25_deg]))
+                        num = 4 * (tnLE - 0.25) * (1 - TR) / (1 + TR)
+                        AR = num / (tn25 - 0.00)
+                    # Failsafe: we shouldn't reach this if code above works
+                    else:
+                        raise RuntimeError("Couldn't resolve wing geometry")
+                    assert notNone(AR), "Bug: AR should've been defined here!"
+
+                # No aspect ratio or taper ratio given!
+                else:
+                    # Two or fewer angles are known
+                    if sum(map(notNone, [sLE_deg, s25_deg, sMT_deg])) <= 2:
+                        break
+
+                    # All angles are known, find taper or aspect ratio
+                    def f_TR(AR, tanM, tanN, m, n):
+                        """TR as a function of AR and sweep angles/positions."""
+                        ARfact = 4 / AR
+                        sweepfact = (tanM - tanN) / (n - m)
+                        taper = (ARfact - sweepfact) / (ARfact + sweepfact)
+                        return taper
+
+                    tnLE, tn25, tnMT = \
+                        np.tan(np.radians([sLE_deg, s25_deg, sMT_deg]))
+                    xcMT = xcMT_from_LEsweep(sLE_deg)
+
+                    def f_opt(AR):
+                        """Solver, reaches 0 when correct AR is found."""
+                        lhs = f_TR(AR, tnLE, tn25, 0.00, 0.25)
+                        rhs = f_TR(AR, tnMT, tn25, xcMT, 0.25)
+                        return lhs - rhs
+
+                    AR = optimize.newton(f_opt, x0=8)
+
+                # Lock in our AR and TR (so the sweep function can use them)
+                self.aspectratio = AR
+                self.taperratio = TR
+
+            # Save the state of the wing
+            self.sweep_le_deg = sLE_deg
+            self.sweep_25_deg = s25_deg
+            self.sweep_mt_deg = sMT_deg
+            self.sweep_le_rad = np.radians(sLE_deg)
+            self.sweep_25_rad = np.radians(s25_deg)
+            self.sweep_mt_rad = np.radians(sMT_deg)
+
+            return
+
+        @revert2scalar
+        def sweep_m_rad(self, m, n=None, sweep_n_rad=None):
+            """
+            Arbitrary chord-line sweep for trapezoidal planform USAF DATCOM.
+
+            Args:
+                m: Desired chord fraction for which sweep is computed.
+                n: Reference chord fraction n's chordwise fractional position.
+                sweep_n_rad: Reference chord fraction n's sweep, in radians.
+
+            Returns:
+                Sweep of chord-line m, in radians.
+
+            """
+            # Recast as necessary
+            m = recastasnpfloatarray(m)
+            n = recastasnpfloatarray(0.0 if n is None else n)
+
+            # noinspection PyUnresolvedReferences
+            if (n == 0).all() and sweep_n_rad is None:
+                sweep_n_rad = self.sweep_le_rad
+            elif (n == 0.25).all() and sweep_n_rad is None:
+                sweep_n_rad = self.sweep_25_rad
+
+            # Refactoring
+            aspectR = self.aspectratio
+            taperR = self.taperratio
+
+            ARterm = 4 / aspectR * ((m - n) * (1 - taperR) / (1 + taperR))
+            sweep_m_rad = np.arctan(np.tan(sweep_n_rad) - ARterm)
+
+            return sweep_m_rad
+
+        # @revert2scalar <- doesn't need due to dependency on other fcn that has
+        def sweep_m_deg(self, m, n=None, sweep_n_deg=None):
+            """
+            Arbitrary chord-line sweep for trapezoidal planform USAF DATCOM.
+
+            Args:
+                m: Desired chord fraction for which sweep is computed.
+                n: Reference chord fraction n's chordwise fractional position.
+                sweep_n_deg: Reference chord fraction n's sweep, in degrees.
+
+
+            Returns:
+                Sweep of chord-line m, in degrees.
+
+            """
+            sweep_n_rad = np.radians(sweep_n_deg)
+            sweep_m_rad = self.sweep_m_rad(m=m, n=n, sweep_n_rad=sweep_n_rad)
+
+            return np.degrees(sweep_m_rad)
 
     class DesignPerformance(BaseMethods):
 
@@ -217,7 +527,7 @@ def get_default_concept_design_objects():
         mu_R = 0.03
         # Lift coefficients
         CL0 = 0.0
-        CLTO = 0.95
+        CLTO: float
         CLalpha = 5.2
         CLmax: float
         CLmaxHL: float
@@ -230,6 +540,17 @@ def get_default_concept_design_objects():
             ("climb", 0.75), ("cruise", 0.85), ("servceil", 0.65),
             ("take-off", 0.45), ("turn", 0.85)
         ])
+
+        def __init__(self, performance: dict):
+            super().__init__(dictionary=performance)
+
+            # Skip the warnings from trying to access undefined attributes
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+
+                if self.CLTO is None:
+                    self.CLTO = max(
+                        self.CLmaxTO - np.radians(12) * self.CLalpha, 0.0)
 
     return DesignBrief, DesignDefinition, DesignPerformance
 
@@ -344,27 +665,22 @@ class AircraftConcept:
                 the future design.
 
                 aspectratio
-                    Float. Wing aspect ratio. Optional, defaults to 8.
+                    Float. Wing aspect ratio.
 
                 sweep_le_deg
                     Float. Main wing leading edge sweep angle (in degrees).
-                    Optional, defaults to zero (no sweep).
 
                 sweep_mt_deg
                     Float. Main wing sweep angle measured at the maximum
-                    thickness point. Optional, defaults to value of
-                    'sweep_le_deg'.
+                    thickness point.
 
                 sweep_25_deg
                     Float. Main wing sweep angle measured at the quarter chord
-                    point. Optional, defaults to ~29% sweep_le_deg,
-                    ~71% sweep_mt_deg.
+                    point.
 
                 taperratio
                     Float. Standard definition of wing tip chord to root chord
                     ratio, zero for sharp, pointed wing-tip delta wings.
-                    Optional, defaults to the theoretical optimal value as a
-                    function of the quarter-chord sweep angle.
 
                 weight_n
                     Float. Specifies the maximum take-off weight of the
@@ -389,8 +705,7 @@ class AircraftConcept:
                     Optional, defaults to 0.03.
 
                 CLTO
-                    Float. Take-off lift coefficient. Optional, defaults to
-                    0.95.
+                    Float. Take-off lift coefficient. Optional.
 
                 CLalpha
                     Float. The three-dimensional lift curve slope of the
@@ -471,6 +786,8 @@ class AircraftConcept:
 
         return
 
+    @raise_bad_method_error
+    @revert2scalar
     def ground_influence_coefficient(self, wingloading_pa, h_m=None, *,
                                      method: str = None) -> np.ndarray:
         """
@@ -483,7 +800,7 @@ class AircraftConcept:
             h_m: Height of the wing above the ground, in metres. Optional,
                 defaults to slightly above ground-level (2 metres).
             method: Users may select any of:
-                "Wieselberger"; "Asselin"; "McCormick";
+                'Wieselberger'; 'Asselin'; 'McCormick';
 
         Returns:
             Estimate for the ground influence coefficient, phi.
@@ -500,11 +817,15 @@ class AircraftConcept:
         h_m = recastasnpfloatarray(h_m)
         method = "McCormick" if method is None else method
 
+        if (h_m < 0).any():
+            errormsg = f"Height of wing above ground h may not be less than 0 m"
+            raise ValueError(errormsg)
+
         # Get wing span
         aspectratio = self.design.aspectratio
         weight_n = self.design.weight_n
 
-        S_m2 = wingloading_pa * weight_n
+        S_m2 = weight_n / wingloading_pa
         b_sq = S_m2 * aspectratio
 
         if method == "Wieselberger":
@@ -519,24 +840,33 @@ class AircraftConcept:
         elif method == "Asselin":
             h_over_b = h_m / b_sq ** 0.5
             phi = 1 - 2 / np.pi ** 2 * np.log(1 + np.pi / 8 / h_over_b)
+            phi = np.clip(phi, 0, None)
 
         else:
-            raise ValueError(f"Invalid selection {method=}. Try 'McCormick'?")
+            raise ValueError(f"Invalid selection {method=}.")
 
         return phi
 
+    @raise_bad_method_error
+    @revert2scalar
     def CLslope(self, *, method: str = None, **kwargs):
         """
         Estimate the lift-curve slope of the aircraft's main wing.
+
+        Keyword Args:
+            method: Users may select any from:
+                "Helmbold"; "DATCOM";
+            mach: Mach number. Optional, defaults to 0.0 (incompressible).
 
         Returns:
             The 3D lift slope of the main wing, CLalpha (per radian).
 
         """
-        method = "Helmbold" if method is None else method
+        # Recast as necessary
+        method = "DATCOM" if method is None else method
 
         aspectratio = self.design.aspectratio
-        mach = recastasnpfloatarray(kwargs.get("mach", 0.3))
+        mach = recastasnpfloatarray(kwargs.get("mach", 0.0))
 
         if method == "Helmbold":
             num = 2 * np.pi * aspectratio
@@ -544,11 +874,11 @@ class AircraftConcept:
             CLalpha = num / den
 
         elif method == "DATCOM":
-            # Get 50% sweep (assume it's the same as the maxthickness sweep)
-            sweep = np.radians(self.design.sweep_mt_deg)
+            # Get 50% sweep
+            sweep = self.design.sweep_m_rad(0.5)
 
             beta = (1 - mach ** 2) ** 0.5  # Prandtl-Glauert correction
-            kappa = 1.0
+            kappa = 0.96  # Assume ratio of 2D lift slope to 2pi is less than 1
 
             num = 2 * np.pi * aspectratio
             ARfactor = (aspectratio * beta / kappa) ** 2
@@ -558,10 +888,12 @@ class AircraftConcept:
             CLalpha = num / den
 
         else:
-            raise ValueError(f"Invalid selection {method=}. Try 'DATCOM'?")
+            raise ValueError(f"Invalid selection {method=}")
 
         return CLalpha
 
+    @raise_bad_method_error
+    @revert2scalar
     def cdi_factor(self, *, method: str = None, **kwargs):
         """
         Estimate the induced drag factor (as in CD = CD_0 + k * CL^2).
@@ -569,12 +901,12 @@ class AircraftConcept:
         Keyword Args:
             mach: Freestream Mach number.
             method: Users may select any of:
-                "Cavallo", for Oswald span efficiency, e0;
-                "Brandt", for inviscid span efficiency, e;
-                "Nita-Scholz", for Oswald span efficiency, e0=f(M);
-                "Obert", for Oswald span efficiency, e0;
-                "Kroo", for Oswald span efficiency, e0;
-                "Douglas," for Oswald span efficiency, e0;
+                'Cavallo', for Oswald span efficiency, e0;
+                'Brandt', for inviscid span efficiency, e;
+                'Nita-Scholz', for Oswald span efficiency, e0=f(M);
+                'Obert', for Oswald span efficiency, e0;
+                'Kroo', for Oswald span efficiency, e0;
+                'Douglas', for Oswald span efficiency, e0;
 
         Returns:
             Estimate for induced drag factor, k.
@@ -678,7 +1010,7 @@ class AircraftConcept:
                     f"Estimate for Oswald span efficiency hit 0%. Perhaps the "
                     f"Mach number is too high? (got {np.amax(mach)=:.3f})"
                 )
-                warnings.warn(warnmsg, RuntimeWarning)
+                warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
 
             cdi_factor = 1 / (e0_estimate * piAR)
 
@@ -732,13 +1064,15 @@ class AircraftConcept:
             raise NotImplementedError("Awaiting implementation")
 
         else:
-            raise ValueError(f"Invalid selection {method=}. Try 'Nita-Scholz'?")
+            raise ValueError(f"Invalid selection {method=}.")
 
         return cdi_factor
 
+    @revert2scalar
     def get_bestV_BG(self, wingloading_pa, altitude_m=None):
         """
-        Estimate the speed, VBG, which results in best gliding performance.
+        Estimate the speed, VBG, which results in best gliding performance
+        (maximised operating L/D).
 
         Args:
             wingloading_pa: Aircraft wing loading, in Pascal.
@@ -773,6 +1107,7 @@ class AircraftConcept:
 
         return bestspeed_mps
 
+    @revert2scalar
     def get_bestV_CAR(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, VCAR, which results in best jet range. This is also
@@ -807,6 +1142,7 @@ class AircraftConcept:
 
         return bestspeed_mps
 
+    @revert2scalar
     def get_bestV_X(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, VX, which results in the best angle of climb.
@@ -899,6 +1235,7 @@ class AircraftConcept:
 
         return bestspeed_mps
 
+    @revert2scalar
     def get_bestV_Y(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, VY, which results in the best rate of climb.
@@ -977,15 +1314,16 @@ class AircraftConcept:
 
         raise NotImplementedError("Unsupported propulsion system type")
 
+    @revert2scalar
     def get_bestCL_range(self, constantspeed: bool = None) -> tuple:
         """
-        Estimate the best coefficient of lift for a maximum range type cruising
-        profile.
+        Finds the best CL (and L/D ratio) for the cruising conditions that
+        maximise range in constant attitude cruise profiles.
 
         Args:
             constantspeed: Flags whether constraint considers cruise speed as
                 a constant over the particular cruise profile. Optional,
-                defaults to False (implies constant-altitude/constant-attitude).
+                defaults to False (constant altitude/constant attitude cruise).
 
         Returns:
             Tuple of (the best coefficient of lift, L/D ratio at this CL).
@@ -1020,15 +1358,16 @@ class AircraftConcept:
 
         return bestCL, LDratio
 
+    @revert2scalar
     def get_bestCL_endurance(self, constantspeed: bool = None) -> tuple:
         """
-        Estimate the best coefficient of lift for a maximum endurance type
-        cruising profile.
+        Finds the best CL (and L/D ratio) for the cruising conditions that
+        maximise endurance in constant attitude cruise profiles.
 
         Args:
             constantspeed: Flags whether constraint considers cruise speed as
                 a constant over the particular cruise profile. Optional,
-                defaults to False (implies constant-altitude/constant-attitude).
+                defaults to False (constant altitude/constant attitude cruise).
 
         Returns:
             Tuple of (the best coefficient of lift, L/D ratio at this CL).
@@ -1099,7 +1438,7 @@ class AircraftConcept:
         methods = kwargs.get("methods", dict())
 
         # Determine the thrust and power lapse corrections
-        climbspeed_mpsias = co.kts2mps(climbspeed_kias)
+        climbspeed_mpsias = co.kts_mps(climbspeed_kias)
         climbspeed_mpstas = self.designatm.eas2tas(
             eas=climbspeed_mpsias,
             altitude_m=climbalt_m
@@ -1127,11 +1466,11 @@ class AircraftConcept:
         wslim_pa = CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
-            # warnings.warn(warnmsg, RuntimeWarning)
+            # warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... load factor due to climb
-        climbrate_mps = co.fpm2mps(climbrate_fpm)
+        climbrate_mps = co.fpm_mps(climbrate_fpm)
         climbrate_mpstroc = self.designatm.eas2tas(
             eas=climbrate_mps, altitude_m=climbalt_m)
         cos_theta = (1 - (climbrate_mpstroc / climbspeed_mpstas) ** 2) ** 0.5
@@ -1189,7 +1528,7 @@ class AircraftConcept:
         methods = kwargs.get("methods", dict())
 
         # Determine the thrust and power lapse corrections
-        cruisespeed_mpstas = co.kts2mps(cruisespeed_ktas)
+        cruisespeed_mpstas = co.kts_mps(cruisespeed_ktas)
         mach = cruisespeed_mpstas / self.designatm.vsound_mps(cruisealt_m)
         tcorr = cruisethrustfact * self.propulsion.thrust(
             mach=mach, altitude_m=cruisealt_m, norm=True,
@@ -1213,7 +1552,7 @@ class AircraftConcept:
         wslim_pa = CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
-            # warnings.warn(warnmsg, RuntimeWarning)
+            # warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... coefficient of drag
@@ -1261,7 +1600,7 @@ class AircraftConcept:
         methods = kwargs.get("methods", dict())
 
         # Determine the thrust and power lapse corrections
-        secclimbspd_mpsias = co.kts2mps(secclimbspd_kias)
+        secclimbspd_mpsias = co.kts_mps(secclimbspd_kias)
         secclimbspd_mpstas = self.designatm.eas2tas(
             eas=secclimbspd_mpsias,
             altitude_m=servceil_m
@@ -1289,13 +1628,13 @@ class AircraftConcept:
         wslim_pa = CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
-            # warnings.warn(warnmsg, RuntimeWarning)
+            # warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... load factor due to climb
         # Service ceiling typically defined in terms of climb rate (at best
         # climb speed) dropping to 100feet/min ~ 0.508m/s
-        climbrate_mps = co.fpm2mps(100)
+        climbrate_mps = co.fpm_mps(100)
         # What true climb rate does 100 feet/minute correspond to?
         climbrate_mpstroc = self.designatm.eas2tas(
             eas=climbrate_mps, altitude_m=servceil_m)
@@ -1432,7 +1771,7 @@ class AircraftConcept:
         methods = kwargs.get("methods", dict())
 
         # Determine the thrust and power lapse corrections
-        turnspeed_mpstas = co.kts2mps(turnspeed_ktas)
+        turnspeed_mpstas = co.kts_mps(turnspeed_ktas)
         mach = turnspeed_mpstas / self.designatm.vsound_mps(turnalt_m)
         tcorr = self.propulsion.thrust(
             mach=mach, altitude_m=turnalt_m, norm=True,
@@ -1456,7 +1795,7 @@ class AircraftConcept:
         wslim_pa = CLmax * q_pa
         if (ws_pa > wslim_pa).any():
             # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
-            # warnings.warn(warnmsg, RuntimeWarning)
+            # warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
             ws_pa[ws_pa > wslim_pa] = np.nan
 
         # ... coefficient of drag
@@ -1492,7 +1831,7 @@ class AircraftConcept:
 
         # We do the q calculation at SL conditions, TAS ~= EAS ~= CAS
         # (on the basis that the stall Mach number is likely very small)
-        stallspeed_mpstas = co.kts2mps(vstallclean_kcas)
+        stallspeed_mpstas = co.kts_mps(vstallclean_kcas)
 
         # Dynamic pressure at sea level
         q_pa = self.designatm.dynamicpressure_pa(stallspeed_mpstas, 0.0)
@@ -1654,7 +1993,7 @@ class AircraftConcept:
             ax2_x.set_xticks([])
             # x, label
             ax3_x = ax.secondary_xaxis(yloc,
-                                       functions=(co.pa2lbfft2, co.lbfft22pa))
+                                       functions=(co.Pa_lbfft2, co.lbfft2_Pa))
             ax3_x.set_xlabel("Wing Loading")
             if type_is_power:
                 ax.set_ylabel("Power-to-Weight")
@@ -1666,12 +2005,12 @@ class AircraftConcept:
         ax.xaxis.set_label_coords(1.09, -0.02)
         # x, imperial
         yloc = -0.12  # Shared y-location of secondary and tertiary axes
-        ax2_x = ax.secondary_xaxis(yloc, functions=(co.m22feet2, co.feet22m2))
+        ax2_x = ax.secondary_xaxis(yloc, functions=(co.m2_ft2, co.ft2_m2))
         ax2_x.set_xlabel("[ft$^2$]")
         ax2_x.xaxis.set_label_coords(1.09, -0.02)
         ax2_x.set_xticks([])
         # x, label
-        ax3_x = ax.secondary_xaxis(yloc, functions=(co.m22feet2, co.feet22m2))
+        ax3_x = ax.secondary_xaxis(yloc, functions=(co.m2_ft2, co.ft2_m2))
         ax3_x.set_xlabel("Wing Area")
         if type_is_power:
             # y, metric
@@ -1679,11 +2018,11 @@ class AircraftConcept:
             ax.set_ylabel("[W]")
             ax.yaxis.label.set_color((1.0, 0, 0, 0))
             # y, metric & imperial
-            secax_y = ax.secondary_yaxis(0, functions=(co.w2kw, co.kw2w))
+            secax_y = ax.secondary_yaxis(0, functions=(co.W_kW, co.kW_W))
             secax_y.set_ylabel("[hp] | [kW]" + " " * 28, rotation=0)
             secax_y.yaxis.set_label_coords(0.0, -.1)  # x-transform is useless
             # y, label
-            terax_y = ax.secondary_yaxis(-.14, functions=(co.w2hp, co.hp2w))
+            terax_y = ax.secondary_yaxis(-.14, functions=(co.W_hp, co.hp_W))
             terax_y.set_ylabel("Shaft Power")
         else:
             # y, metric
@@ -1691,11 +2030,22 @@ class AircraftConcept:
             ax.set_ylabel("[N]")
             ax.yaxis.label.set_color((1.0, 0, 0, 0))
             # y, metric & imperial
-            secax_y = ax.secondary_yaxis(0, functions=(co.n2kn, co.kn2n))
+            secax_y = ax.secondary_yaxis(0, functions=(co.N_kN, co.kN_N))
             secax_y.set_ylabel("[lbf] | [kN]" + " " * 22, rotation=0)
             secax_y.yaxis.set_label_coords(0.0, -.1)  # x-transform is useless
             # y, label
-            terax_y = ax.secondary_yaxis(-.14, functions=(co.n2lbf, co.lbf2n))
+            terax_y = ax.secondary_yaxis(-.14, functions=(co.N_lbf, co.lbf_N))
             terax_y.set_ylabel("Thrust")
 
         return fig, ax
+
+    def plot_planform(self):
+
+        print("Sorry, method doesn't exist yet. Here's some planform data:")
+        print(f"\tAspect Ratio: {self.design.aspectratio}")
+        print(f"\tTaper Ratio: {self.design.taperratio}")
+        print(f"\tSweep (LE) [deg]: {self.design.sweep_le_deg}")
+        print(f"\tSweep (QC) [deg]: {self.design.sweep_25_deg}")
+        print(f"\tSweep (MT) [deg]: {self.design.sweep_mt_deg}")
+
+        return
