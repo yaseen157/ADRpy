@@ -65,7 +65,7 @@ ADRpy is written in Python 3 and tested in Python version 3.9.
 ### Using the Python Package Index
 
 > ⚠️ **WARNING**: The latest version of ADRpy available using this method is
-> version 0.2.5, which is not the version in this repository (version 0.3.0).
+> version 0.2.x, which is not the version in this repository (version 0.3.0).
 > They are not compatible, and this section is here for reference only. If you'd
 > like to install ADRpy 0.3.0, *do not use the Python Package Index*, and
 > instead follow the instructions written for using git to clone the repository,
