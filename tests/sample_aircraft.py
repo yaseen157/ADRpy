@@ -23,7 +23,7 @@ def Cirrus_SR22():
     # vstall_CG_FWD_kcas = 73
     # vstall_CG_AFT_kcas = 70
     # Use the above to guess a representative speed at regular CG position
-    vstall_kcas = 72
+    vstall_kcas = 72.12
 
     designbrief = {
         # Take-off
@@ -53,8 +53,9 @@ def Cirrus_SR22():
         "mu_R": 0.04, "CLTO": 0.590, "CLmaxTO": 1.69
     }
     eta_prop = {
-        "cruise": 0.80, "turn": 0.65, "climb": 0.65, "servceil": 0.60,
-        "take-off": 0.40}
+        "cruise": 0.88, "turn": 0.85, "climb": 0.71,
+        "servceil": 0.65, "take-off": 0.45
+    }
     designperformance.update({"eta_prop": eta_prop})
 
     designatm = at.Atmosphere()
@@ -139,4 +140,5 @@ def keane_smallUAV():
 
 
 if __name__ == "__main__":
-    keane_smallUAV()
+    sampleac = Cirrus_SR22()
+    pass

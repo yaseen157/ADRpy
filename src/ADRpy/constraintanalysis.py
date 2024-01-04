@@ -1970,7 +1970,7 @@ class AircraftConcept:
                 zip(("labels", "handles"), zip(*legenddict.items())))
 
             default_legend_kwargs = dict(
-                [("bbox_to_anchor", (1.05, 0.618)), ("loc", "center left")])
+                [("bbox_to_anchor", (1.05, 0.98)), ("loc", "upper left")])
             default_legend_kwargs.update(legenddict)
             return ax.legend(**{**default_legend_kwargs, **kwargs})
 
