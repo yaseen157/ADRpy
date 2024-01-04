@@ -44,10 +44,15 @@ For video tutorials and explainers (a.k.a. *ADRpy Shorts*) scroll to the bottom
 of this page.
 
 Components of this library are written to be both easy to read and modify
-without requiring significant coding knowledge. Confident coders looking for a
-more flexible and expandable library architecture may wish to check out ADRpy's
-companion library [CARPy](https://github.com/yaseen157/carpy/tree/main) (
-currently a work in progress!).
+without requiring significant coding knowledge.
+
+[//]: # (Confident coders looking for a)
+
+[//]: # (more flexible and expandable library architecture may wish to check out ADRpy's)
+
+[//]: # (companion library [CARPy]&#40;https://github.com/yaseen157/carpy/tree/main&#41; &#40;)
+
+[//]: # (currently a work in progress!&#41;.)
 
 ---
 
@@ -56,6 +61,15 @@ currently a work in progress!).
 ADRpy is written in Python 3 and tested in Python version 3.9.
 
 *It is not available for Python 2.*
+
+### Using the Python Package Index
+
+> ⚠️ **WARNING**: The latest version of ADRpy available using this method is
+> version 0.2.5, which is not the version in this repository (version 0.3.0).
+> They are not compatible, and this section is here for reference only. If you'd
+> like to install ADRpy 0.3.0, *do not use the Python Package Index*, and
+> instead follow the instructions written for using git to clone the repository,
+> or manually downloading the source (see below).
 
 On most systems you should be able to simply open an operating system terminal
 and at the command prompt type
@@ -77,15 +91,59 @@ entering
 
 at the operating system prompt.
 
+### Using git clone
+
 An alternative approach to installing ADRpy is to clone the GitHub repository,
 by typing
 
-    $ git clone https://github.com/sobester/ADRpy.git
+    $ git clone https://github.com/yaseen157/ADRpy.git
 
 at the command prompt and then executing the setup file in the same directory by
 entering:
 
     $ python setup.py install
+
+### Installing from Source using `pip`
+
+At the top of the GitHub page is a green `Code` dropdown.
+Download the .zip file and unpackage ADRpy into a directory you'd like to
+install it into.
+
+Start a command prompt window at this location, and enter the ADRpy directory:
+
+    $ cd ./ADRpy
+
+When you are in the ADRpy root folder, you can type the following to install
+ADRpy:
+
+    $ pip install -e ./
+
+Notice that unlike the previous pip instructions that specified the library
+name (which tells pip to look in the cloud for the ADRpy library), using `./`
+tells pip to make an (optionally editable, with`-e`) install of the library
+source code that it finds inside the folder you're in.
+
+### Uninstalling with `pip`
+
+Sorry to see you go! Open a command prompt anywhere in your ADRpy enabled
+Python environment. You don't need to navigate to a specific folder to uninstall
+ADRpy, as pip already knows where ADRpy lives on your machine. Type as follows:
+
+    $ pip uninstall ADRpy -y
+
+Which tells pip to uninstall any package on your machine it knows to be called
+ADRpy, and uses the optional flag `-y` to answer "yes" automatically to any
+prompt asking the user if they want to uninstall.
+
+> 💡 **Note:** It's not uncommon for Python users to make use of "virtual
+> environments." These behave like isolated installs of Python so for scientific
+> or development purposes, you can be sure your code depends on exactly the
+> files and libraries you want it to. Make sure you're in the correct
+> environment when you're uninstalling, or nothing will happen. You can tell
+> which environment has ADRpy in because you can type in the terminal:
+>
+>       $ pip show ADRpy
+> and see ADRpy library info (as well as the installed version number).
 
 ---
 
@@ -127,7 +185,6 @@ from ADRpy import atmospheres as at
 from ADRpy import constraintanalysis as ca
 from ADRpy import unitconversions as co
 
-
 # The environment: 'unusually high temperature at 5km' atmosphere
 # from MIL-HDBK-310. 
 
@@ -137,24 +194,24 @@ profile_ht5_1percentile, _ = at.mil_hdbk_310('high', 'temp', 5)
 # ...then use them to create an atmosphere object 
 m310_ht5 = at.Atmosphere(profile=profile_ht5_1percentile)
 
-#====================================================================
+# ====================================================================
 
 # The take-off aspects of the design brief:
-designbrief = {'rwyelevation_m':1000, 'groundrun_m':1200}
+designbrief = {'rwyelevation_m': 1000, 'groundrun_m': 1200}
 
 # Basic features of the concept:
 # aspect ratio, throttle ratio 
-designdefinition = {'aspectratio':7.3, 'tr':1.05}
+designdefinition = {'aspectratio': 7.3, 'tr': 1.05}
 
 # Initial estimates of aerodynamic performance:
-designperf = {'CDTO':0.04, 'CLTO':0.9, 'CLmaxTO':1.6,
-              'mu_R':0.02} # ...and wheel rolling resistance coeff.
+designperf = {'CDTO': 0.04, 'CLTO': 0.9, 'CLmaxTO': 1.6,
+              'mu_R': 0.02}  # ...and wheel rolling resistance coeff.
 
 # An aircraft concept object can now be instantiated
 concept = ca.AircraftConcept(designbrief, designdefinition,
                              designperf, m310_ht5, "Piston")
 
-#====================================================================
+# ====================================================================
 
 # Compute the required standard day sea level thrust/MTOW ratio reqd.
 # for the target take-off performance at a range of wing loadings:
