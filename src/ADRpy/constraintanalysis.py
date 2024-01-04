@@ -45,6 +45,7 @@ def raise_bad_method_error(func):
         methodsection, = methodsection
 
     allowed_methods = set(re.findall(r"""["']([A-z-]+),?["']""", methodsection))
+    allowed_methods = allowed_methods | {None}
 
     @wraps(func)
     def with_method_checking(*args, **kwargs):
@@ -817,6 +818,8 @@ class AircraftConcept:
         h_m = recastasnpfloatarray(h_m)
         method = "McCormick" if method is None else method
 
+        wingloading_pa, h_m = np.broadcast_arrays(wingloading_pa, h_m)
+
         if (h_m < 0).any():
             errormsg = f"Height of wing above ground h may not be less than 0 m"
             raise ValueError(errormsg)
@@ -824,6 +827,11 @@ class AircraftConcept:
         # Get wing span
         aspectratio = self.design.aspectratio
         weight_n = self.design.weight_n
+
+        if weight_n is None:
+            warnmsg = f"No known concept weight, ignoring wing in-ground-effect"
+            warnings.warn(warnmsg, RuntimeWarning)
+            return np.ones(h_m.shape)
 
         S_m2 = weight_n / wingloading_pa
         b_sq = S_m2 * aspectratio

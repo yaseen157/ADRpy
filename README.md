@@ -201,10 +201,10 @@ designbrief = {'rwyelevation_m': 1000, 'groundrun_m': 1200}
 
 # Basic features of the concept:
 # aspect ratio, throttle ratio 
-designdefinition = {'aspectratio': 7.3, 'tr': 1.05}
+designdefinition = {'aspectratio': 7.3}
 
 # Initial estimates of aerodynamic performance:
-designperf = {'CDTO': 0.04, 'CLTO': 0.9, 'CLmaxTO': 1.6,
+designperf = {'CLTO': 0.9, 'CLmaxTO': 1.6,
               'mu_R': 0.02}  # ...and wheel rolling resistance coeff.
 
 # An aircraft concept object can now be instantiated
@@ -227,14 +227,14 @@ You should see the following output:
 
     Required T/W under MIL-HDBK-310 conditions:
 
-    T/W (SL, static thrust): [0.32348606 0.44523742 0.56698878 0.68874015]
+    T/W (SL, static thrust): [0.40151802 0.52326939 0.64502075 0.76677211]
 
 ---
 
 ## More extensive examples - a library of notebooks
 
 To view them on GitHub, go
-to [ADRpy's notebooks folder](https://github.com/sobester/ADRpy/tree/master/docs/ADRpy/notebooks).
+to [ADRpy's notebooks folder](https://github.com/yaseen157/ADRpy/tree/master/docs/ADRpy/notebooks).
 
 Alternatively, grab the whole repository as a .zip by clicking the big, green '
 Code' button at the top of this page.
