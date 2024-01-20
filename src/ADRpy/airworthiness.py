@@ -12,7 +12,6 @@ from matplotlib import pyplot as plt
 from scipy import constants, optimize as sopt
 
 from ADRpy import constraintanalysis as ca
-# Don't believe PyCharm 2023's lies, we are v. much using ADRpy.unitconversions!
 from ADRpy import unitconversions as uc
 from ADRpy import mtools4acdc as actools
 
@@ -974,41 +973,3 @@ class CS23Amendment4:
             return VFmin
 
         return get_VFmin
-
-
-if __name__ == "__main__":
-    from ADRpy import atmospheres as at
-    from ADRpy import constraintanalysis as ca
-    from ADRpy import unitconversions as uc
-
-    designbrief = {
-        "vstallclean_kcas": 101
-    }
-
-    designdef = {
-        "aspectratio": 10.48,
-        "weight_n": uc.lbf_N(17120)
-    }
-
-    designperf = {
-        "CLmax": 1.6, "CLmin": -1, "CLalpha": 6.28
-    }
-
-    designatm = at.Atmosphere()  # set the design atmosphere to a zero-offset ISA
-
-    designpropulsion = "Turboprop"
-
-    Beech1900Dconcept = ca.AircraftConcept(
-        brief=designbrief,
-        design=designdef,
-        performance=designperf,
-        atmosphere=designatm,
-        propulsion=designpropulsion
-    )
-
-    Beech1900Dcs23spec = CS23Amendment4(Beech1900Dconcept, "commuter",
-                                        uc.ft2_m2(310))
-
-    fig, ax = Beech1900Dcs23spec.plot_Vn(weightfraction=0.7)
-
-    plt.show()

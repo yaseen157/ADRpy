@@ -27,6 +27,7 @@ setup(
     long_description_content_type='text/markdown',
     url='https://github.com/sobester/ADRpy',
     download_url='https://github.com/sobester/ADRpy/tarball/' + __version__,
+    python_requires='>=3.9',
     license='GPLv3',
     classifiers=[
         'Development Status :: 3 - Alpha',
@@ -40,5 +41,7 @@ setup(
     author='Andras Sobester',
     install_requires=install_requires,
     dependency_links=dependency_links,
-    author_email=''
+    author_email='',
+    maintainer='Yaseen Reza',
+    maintainer_email='y.reza@soton.ac.uk'
 )

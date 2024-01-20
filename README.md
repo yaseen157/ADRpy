@@ -24,6 +24,8 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![PyPI version](https://badge.fury.io/py/ADRpy.svg)](https://badge.fury.io/py/ADRpy)
 [![Build Status](https://travis-ci.com/sobester/ADRpy.svg?branch=master)](https://travis-ci.com/sobester/ADRpy)
+![PyPI - Python Version](https://img.shields.io/badge/python-3.9_--_3.12-blue.svg)
+![PyPI - Python Version](https://img.shields.io/badge/jupyter-notebook-orange.svg)
 
 ---
 
@@ -58,11 +60,14 @@ without requiring significant coding knowledge.
 
 ## Installation
 
-ADRpy is written in Python 3 and tested in Python version 3.9.
+ADRpy is written in Python 3 and tested in Python versions 3.9 to 3.12.
 
-*It is not available for Python 2.*
+*It is not available for Python 2, and does not support Python versions 3.8 and below.*
 
-### Using the Python Package Index
+### Using the Python Package Index (ADRpy versions 0.2.x)
+
+![Terminal](https://badgen.net/badge/icon/terminal?icon=terminal&label)
+[![PyPi](https://badgen.net/badge/icon/pypi?icon=pypi&label)](https://https://pypi.org/)
 
 > ⚠️ **WARNING**: The latest version of ADRpy available using this method is
 > version 0.2.x, which is not the version in this repository (version 0.3.x).
@@ -74,14 +79,13 @@ ADRpy is written in Python 3 and tested in Python version 3.9.
 On most systems you should be able to simply open an operating system terminal
 and at the command prompt type
 
-    $ pip install -e ADRpy
+    $ py -m pip install ADRpy
 
 or
 
-    $ python -m pip install -e ADRpy
+    $ python -m pip install ADRpy
 
-NOTE: the `-e` flag is optional, but recommended. It makes the ADRpy install
-*editable*, allowing users to poke and prod the machinery of the library.
+(On some systems, 'py' is an alias for 'python').
 
 NOTE: `pip` is a Python package; if it is not available on your system, download
 [get-pip.py](https://bootstrap.pypa.io/get-pip.py) and run it in Python by
@@ -93,6 +97,9 @@ at the operating system prompt.
 
 ### Using git clone
 
+![Terminal](https://badgen.net/badge/icon/terminal?icon=terminal&label)
+[![git](https://badgen.net/badge/icon/git?icon=git&label)](https://git-scm.com)
+
 An alternative approach to installing ADRpy is to clone the GitHub repository,
 by typing
 
@@ -103,7 +110,10 @@ entering:
 
     $ python setup.py install
 
-### Installing from Source using `pip`
+### Installing from Source using pip
+
+![Terminal](https://badgen.net/badge/icon/terminal?icon=terminal&label)
+[![PyPi](https://badgen.net/badge/icon/pypi?icon=pypi&label)](https://https://pypi.org/)
 
 At the top of the GitHub page is a green `Code` dropdown.
 Download the .zip file and unpackage ADRpy into a directory you'd like to
@@ -123,7 +133,7 @@ name (which tells pip to look in the cloud for the ADRpy library), using `./`
 tells pip to make an (optionally editable, with`-e`) install of the library
 source code that it finds inside the folder you're in.
 
-### Uninstalling with `pip`
+### Uninstalling with pip
 
 Sorry to see you go! Open a command prompt anywhere in your ADRpy enabled
 Python environment. You don't need to navigate to a specific folder to uninstall
@@ -135,9 +145,9 @@ Which tells pip to uninstall any package on your machine it knows to be called
 ADRpy, and uses the optional flag `-y` to answer "yes" automatically to any
 prompt asking the user if they want to uninstall.
 
-> 💡 **Note:** It's not uncommon for Python users to make use of "virtual
-> environments." These behave like isolated installs of Python so for scientific
-> or development purposes, you can be sure your code depends on exactly the
+> 📝 **Note:** It's not uncommon for Python users to make use of "virtual
+> environments." These behave like isolated installations of Python, so for scientific
+> or development purposes you can be sure your code depends on exactly the
 > files and libraries you want it to. Make sure you're in the correct
 > environment when you're uninstalling, or nothing will happen. You can tell
 > which environment has ADRpy in because you can type in the terminal:

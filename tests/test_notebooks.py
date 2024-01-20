@@ -2,6 +2,7 @@
 import os
 import unittest
 
+from jupyter_client.kernelspec import NoSuchKernel
 import nbformat
 from nbclient import NotebookClient
 from nbclient.exceptions import CellExecutionError
@@ -9,15 +10,18 @@ from nbclient.exceptions import CellExecutionError
 
 class RunNotebooks(unittest.TestCase):
 
-    def test_notebooks(self):
+    def test_notebooks(self, write_out: bool = False):
         """
         Tries to run all the code in the notebooks as texts. If it can't, the
         notebook is copied over anyway.
 
+        Args:
+            write_out: False by default, whether to overwrite the Jupyter notebooks.
+
         Notes:
             If you're getting "NoSuchKernel" errors, you probably need to run:
 
-                $ pip install --upgrade pip ipython ipykernel
+                $ python -m pip install --upgrade pip ipython ipykernel
                 $ ipython kernel install --name "python3" --user
 
         """
@@ -63,11 +67,16 @@ class RunNotebooks(unittest.TestCase):
                 client.execute()
             except CellExecutionError:
                 # If we have allowed errors, prepare report to the developer
-                out = None
+                failed2run.append(filename)
+            except NoSuchKernel:
+                print("Maybe you're missing an interactive Python kernel? Try running:\n"
+                      "python -m pip install --upgrade pip ipython ipykernel\n"
+                      "ipython kernel install --name \"python3\" --user")
                 failed2run.append(filename)
             finally:
-                # Save the notebook (and any tracebacks)
-                nbformat.write(nb, filepath)
+                if write_out is True:
+                    # Save the notebook (and any tracebacks)
+                    nbformat.write(nb, filepath)
 
         # Pretty printing for unittest runner
         if failed2open or failed2run:

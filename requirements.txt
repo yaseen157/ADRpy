@@ -13,3 +13,5 @@ python-metar
 openpyxl
 numpy
 nbclient
+ipython
+ipykernel

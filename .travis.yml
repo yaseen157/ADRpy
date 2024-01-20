@@ -1,9 +1,5 @@
 language: python
 python:
-  - "3.5"
-  - "3.6"      # current default Python on Travis CI
-  - "3.7"
-  - "3.8"
   - "3.9"
   - "3.10"
   - "3.11"
@@ -11,6 +7,7 @@ python:
 # command to install dependencies
 install:
   - pip install -r requirements.txt
+  - ipython kernel install --name "python3" --user
 # command to run tests
 script:
   - pytest -s tests/*
