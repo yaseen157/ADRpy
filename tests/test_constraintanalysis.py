@@ -6,7 +6,7 @@ import numpy as np
 from ADRpy import constraintanalysis as ca
 from ADRpy import unitconversions as uc
 
-from sample_aircraft import Cirrus_SR22
+from ADRpy._sampleac import Cirrus_SR22
 
 
 class TestFunctions(unittest.TestCase):

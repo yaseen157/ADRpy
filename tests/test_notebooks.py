@@ -87,7 +87,8 @@ class RunNotebooks(unittest.TestCase):
         if failed2run:
             print(f"[!] These notebook(s) threw errors:"
                   f"\n\t> " + "\n\t> ".join(failed2run))
-            print(f"Saved tracebacks in '{notebooks_src}'")
+            if write_out is True:
+                print(f"Saved tracebacks in '{notebooks_src}'")
             self.fail(f"One or more notebooks failed to run")
         print("\n!!! Make sure to check figures have rendered properly !!!\n")
 

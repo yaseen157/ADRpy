@@ -15,3 +15,4 @@ numpy
 nbclient
 ipython
 ipykernel
+notebook

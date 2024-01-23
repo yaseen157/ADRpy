@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 from codecs import open
 from os import path
 
-__version__ = '0.3.0'
+__version__ = '0.3.1'
 
 here = path.abspath(path.dirname(__file__))
 
@@ -30,7 +30,7 @@ setup(
     python_requires='>=3.9',
     license='GPLv3',
     classifiers=[
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',
         'Programming Language :: Python :: 3',
         'Topic :: Scientific/Engineering'

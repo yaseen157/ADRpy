@@ -983,8 +983,11 @@ def mil_hdbk_310(high_or_low: str, temp_or_dens: str, alt_km: int):
 
 def _reverttoscalar(scalarorvec):
     """ Return scalar response to scalar input. """
-    if not (isinstance(scalarorvec, Number)) and np.size(scalarorvec) == 1:
-        return scalarorvec[0]
+    if isinstance(scalarorvec, np.ndarray):
+        if scalarorvec.ndim == 0:
+            return scalarorvec.item()
+        if sum(scalarorvec.shape) == 1:
+            return scalarorvec[0]
     return scalarorvec
 
 

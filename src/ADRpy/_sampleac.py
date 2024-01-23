@@ -1,9 +1,8 @@
+"""Module for quickly accessing sample aircraft concepts."""
 import numpy as np
-import matplotlib.pyplot as plt
 from ADRpy import unitconversions as uc
 from ADRpy import constraintanalysis as ca
 from ADRpy import atmospheres as at
-from ADRpy import propulsion as pdecks
 
 
 def Cirrus_SR22():
@@ -16,8 +15,7 @@ def Cirrus_SR22():
             and Procedures", Butterworth-Heinemann, 2013.
     """
     # The POH does not recommend exceeding 60 degrees of bank
-    nturn = 1 / np.cos(
-        np.radians(60))  # Approx. load factor for 60 degrees of bank
+    nturn = 1 / np.cos(np.radians(60))  # Approx. load factor for 60 degrees of bank
 
     # There are two stall speeds for MTOW clean-config, depending on CG location
     # vstall_CG_FWD_kcas = 73
@@ -26,36 +24,26 @@ def Cirrus_SR22():
     vstall_kcas = 72.12
 
     designbrief = {
-        # Take-off
-        "rwyelevation_m": 0.0, "groundrun_m": uc.ft_m(1_082),
-        # Sustained turn
-        "turnalt_m": 0, "turnspeed_ktas": 108, "stloadfactor": nturn,
-        # Climb
-        "climbalt_m": 0, "climbspeed_kias": 108, 'climbrate_fpm': 1_251,
-        # Cruise
-        "cruisealt_m": uc.ft_m(10e3), "cruisespeed_ktas": 182,
-        # Service Ceiling
-        "servceil_m": uc.ft_m(20e3), "secclimbspd_kias": 90,
-        # Stall, 1g
-        "vstallclean_kcas": vstall_kcas
+        "rwyelevation_m": 0.0, "groundrun_m": uc.ft_m(1_082),  # Take-off
+        "turnalt_m": 0, "turnspeed_ktas": 108, "stloadfactor": nturn,  # Sustained turn
+        "climbalt_m": 0, "climbspeed_kias": 108, 'climbrate_fpm': 1_251,  # Climb
+        "cruisealt_m": uc.ft_m(10e3), "cruisespeed_ktas": 182,  # Cruise
+        "servceil_m": uc.ft_m(20e3), "secclimbspd_kias": 90,  # Service Ceiling
+        "vstallclean_kcas": vstall_kcas  # Stall, 1g
     }
 
     designdefinition = {
         "aspectratio": 10.12, "taperratio": 0.5,  # Wing "slenderness"
+        "sweep_mt_deg": 0.0,  # Main spar sweep
         "weight_n": uc.lbf_N(3600),  # Weight estimate
         "weightfractions": {"cruise": 3400 / 3600}  # Weight fractions
     }
 
     designperformance = {
-        # General performance
-        "CDmin": 0.02541, "CLmax": 1.41, "CLminD": 0.20, "CL0": 0.0,
-        # Take-off specific performance
-        "mu_R": 0.04, "CLTO": 0.590, "CLmaxTO": 1.69
+        "CDmin": 0.02541, "CLmax": 1.41, "CLminD": 0.20, "CL0": 0.0,  # General performance
+        "mu_R": 0.04, "CLTO": 0.590, "CLmaxTO": 1.69  # Take-off specific performance
     }
-    eta_prop = {
-        "cruise": 0.88, "turn": 0.85, "climb": 0.71,
-        "servceil": 0.65, "take-off": 0.45
-    }
+    eta_prop = {"cruise": 0.88, "turn": 0.85, "climb": 0.71, "servceil": 0.65, "take-off": 0.45}
     designperformance.update({"eta_prop": eta_prop})
 
     designatm = at.Atmosphere()
