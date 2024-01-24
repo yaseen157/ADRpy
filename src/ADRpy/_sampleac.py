@@ -28,6 +28,7 @@ def Cirrus_SR22():
         "turnalt_m": 0, "turnspeed_ktas": 108, "stloadfactor": nturn,  # Sustained turn
         "climbalt_m": 0, "climbspeed_kias": 108, 'climbrate_fpm': 1_251,  # Climb
         "cruisealt_m": uc.ft_m(10e3), "cruisespeed_ktas": 182,  # Cruise
+        "cruisethrustfact": 0.73,  # Cruise throttle setting @ISA
         "servceil_m": uc.ft_m(20e3), "secclimbspd_kias": 90,  # Service Ceiling
         "vstallclean_kcas": vstall_kcas  # Stall, 1g
     }
@@ -40,10 +41,10 @@ def Cirrus_SR22():
     }
 
     designperformance = {
-        "CDmin": 0.02541, "CLmax": 1.41, "CLminD": 0.20, "CL0": 0.0,  # General performance
+        "CDmin": 0.0208, "CLmax": 1.41, "CLminD": 0.20, "CL0": 0.0,  # General performance
         "mu_R": 0.04, "CLTO": 0.590, "CLmaxTO": 1.69  # Take-off specific performance
     }
-    eta_prop = {"cruise": 0.88, "turn": 0.85, "climb": 0.71, "servceil": 0.65, "take-off": 0.45}
+    eta_prop = {"climb": 0.61, "cruise": 0.89, "servceil": 0.535, "take-off": 0.39}
     designperformance.update({"eta_prop": eta_prop})
 
     designatm = at.Atmosphere()

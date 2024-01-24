@@ -1543,7 +1543,7 @@ class AircraftConcept:
             eta_prop=self.performance.eta_prop["cruise"]
         )
         if self.propulsion.type in ["piston", "turboprop", "electricmotor"]:
-            pcorr = self.propulsion.shaftpower(
+            pcorr = cruisethrustfact * self.propulsion.shaftpower(
                 mach=mach, altitude_m=cruisealt_m, norm=True
             ) * self.performance.eta_prop["cruise"]
         else:
