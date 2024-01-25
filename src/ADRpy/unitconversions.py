@@ -243,16 +243,6 @@ def sft3_kgm3(density_slft3):
     return density_slft3 / 0.00194032
 
 
-def tas2eas(tas, localairdensity_kgm3):
-    """Convert True Air Speed to Equivalent Air Speed"""
-    return tas * ((localairdensity_kgm3 / 1.225) ** 0.5)
-
-
-def eas2tas(eas, localairdensity_kgm3):
-    """Convert True Air Speed to Equivalent Air Speed"""
-    return eas / ((localairdensity_kgm3 / 1.225) ** 0.5)
-
-
 def Pa_lbfft2(pressure_pa):
     """Convert pressure from Pascal to lbf(pound-force)/ft^2"""
     return pressure_pa * 0.020885434273039

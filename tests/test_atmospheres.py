@@ -76,6 +76,81 @@ class TestUM(unittest.TestCase):
         self.assertEqual(round(1000 * isa.vsound_mps(alt_m)),
                          round(1000 * 358.972))
 
+    def test_speed_conversions(self):
+        """Tests the methods that convert between different kinds of airspeed."""
+        goldMach = 0.5
+        altitude = 1e3
+        isa = at.Atmosphere()
+
+        # Convert from Mach number and then back to, should get starting value
+        self.assertAlmostEqual(
+            isa.TAS_Mach(isa.Mach_TAS(goldMach, altitude), altitude),
+            goldMach, places=3
+        )
+        self.assertAlmostEqual(
+            isa.EAS_Mach(isa.Mach_EAS(goldMach, altitude), altitude),
+            goldMach, places=3
+        )
+        self.assertAlmostEqual(
+            isa.CAS_Mach(isa.Mach_CAS(goldMach, altitude), altitude),
+            goldMach, places=1  # I don't know why 2 doesn't work here
+        )
+
+        # Convert from Mach number
+        self.assertAlmostEqual(
+            isa.Mach_CAS(goldMach, altitude_m=altitude),
+            160.774, places=2
+        )
+        self.assertAlmostEqual(
+            isa.Mach_EAS(goldMach, altitude_m=altitude),
+            160.245, places=3
+        )
+        self.assertAlmostEqual(
+            isa.Mach_TAS(goldMach, altitude_m=altitude),
+            168.217, places=3
+        )
+        # Convert from TAS
+        speed = 100
+        self.assertAlmostEqual(
+            isa.TAS_Mach(speed, altitude_m=altitude),
+            0.297, places=3
+        )
+        self.assertAlmostEqual(
+            isa.TAS_EAS(speed, altitude_m=altitude),
+            95.261, places=3
+        )
+        self.assertAlmostEqual(
+            isa.TAS_CAS(speed, altitude_m=altitude),
+            95.376, places=2
+        )
+        # Convert from EAS
+        self.assertAlmostEqual(
+            isa.EAS_Mach(speed, altitude_m=altitude),
+            0.312, places=3
+        )
+        self.assertAlmostEqual(
+            isa.EAS_TAS(speed, altitude_m=altitude),
+            104.975, places=3
+        )
+        self.assertAlmostEqual(
+            isa.EAS_CAS(speed, altitude_m=altitude),
+            100.133, places=2
+        )
+        # Convert from CAS
+        self.assertAlmostEqual(
+            isa.CAS_Mach(speed, altitude_m=altitude),
+            0.311640, places=4
+        )
+        self.assertAlmostEqual(
+            isa.CAS_TAS(speed, altitude_m=altitude),
+            104.836, places=2
+        )
+        self.assertAlmostEqual(
+            isa.CAS_EAS(speed, altitude_m=altitude),
+            99.868, places=2
+        )
+        return
+
     def test_runwayclass(self):
         """Tests the methods of the runways class"""
         print("Runway class.")

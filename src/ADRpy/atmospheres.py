@@ -834,20 +834,142 @@ class Atmosphere:
         """
         return 0.5 * self.airdens_kgpm3(altitude_m) * (airspeed_mps ** 2)
 
-    def eas2tas(self, eas, altitude_m):
+    def Mach_TAS(self, mach, altitude_m):
+        """
+        Convert Mach number to TAS at a given altitude.
+
+        Args:
+            mach: Mach number.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
+
+        Returns:
+            True airspeed, in metres per second.
+
+        """
+        vsound_mps = self.vsound_mps(altitude_m=altitude_m)
+        mpstas = mach * vsound_mps
+
+        return mpstas
+
+    def Mach_EAS(self, mach, altitude_m):
+        """
+        Convert Mach number to EAS at a given altitude.
+
+        Args:
+          mach: Mach number.
+          altitude_m: Geopotential altitude above mean sea level, in metres.
+
+        Returns:
+          Equivalent airspeed, in metres per second.
+
+        """
+        mpstas = self.Mach_TAS(mach=mach, altitude_m=altitude_m)
+        mpseas = self.TAS_EAS(tas=mpstas, altitude_m=altitude_m)
+        return mpseas
+
+    def Mach_CAS(self, mach, altitude_m):
+        """
+        Convert Mach number to CAS at a given altitude.
+
+        Args:
+            mach: Mach number.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
+
+        Returns:
+            Calibrated airspeed, in metres per second.
+
+        """
+        # Static to total pressure ratio, from isentropic flow relations
+        exponent = -GAMMA_DRY_AIR / (GAMMA_DRY_AIR - 1)
+        p_pt = (1 + (GAMMA_DRY_AIR - 1) / 2 * mach ** 2) ** exponent
+
+        # Convert using pstatic to dynamic pressure
+        pstatic = self.airpress_pa(altitude_m=altitude_m)
+        qc = pstatic * (1 / p_pt - 1)
+
+        # Evaluate this dynamic pressure at sea-level with the same relations
+        p0 = 101_325
+        p_pt = p0 / (p0 + qc)
+
+        # Isentropic flow relations back to speed
+        exponent = 1 / exponent
+        mach_corr = ((p_pt ** exponent - 1) * 2 / (GAMMA_DRY_AIR - 1)) ** 0.5
+        vsound_mps = self.vsound_mps(altitude_m=0)
+        mpscas = mach_corr * vsound_mps
+
+        return mpscas
+
+    def TAS_Mach(self, mpstas, altitude_m):
+        """
+        Convert TAS to Mach at a given altitude.
+
+        Args:
+            mpstas: True airspeed, in metres per second.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
+
+        Returns:
+            Mach number.
+
+        """
+        vsound_mps = self.vsound_mps(altitude_m=altitude_m)
+        mach = mpstas / vsound_mps
+
+        return mach
+
+    def TAS_EAS(self, tas, altitude_m):
+        """
+        Convert TAS to EAS at a given altitude.
+
+        Args:
+            tas: True airspeed, in any valid unit of speed.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
+        Returns:
+            Equivalent airspeed in the same unit as the input.
+
+        """
+        dratio = self.airdens_kgpm3(altitude_m) / self.airdens_kgpm3(0)
+        return tas * np.sqrt(dratio)
+
+    def TAS_CAS(self, mpstas, altitude_m):
+        """
+        Convert TAS to CAS at a given altitude.
+
+        Args:
+            mpstas: True airspeed, in metres per second.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
+
+        Returns:
+            Calibrated airspeed, in metres per second.
+
+        """
+        mach = self.TAS_Mach(mpstas=mpstas, altitude_m=altitude_m)
+        mpscas = self.Mach_CAS(mach=mach, altitude_m=altitude_m)
+
+        return mpscas
+
+    def EAS_Mach(self, mpseas, altitude_m):
+        """
+        Converts EAS to Mach at a given altitude.
+
+        Args:
+            mpseas: The equivalent airspeed, in metres per second.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
+
+        Returns:
+            Mach number.
+
+        """
+        mpstas = self.EAS_TAS(eas=mpseas, altitude_m=altitude_m)
+        mach = self.TAS_Mach(mpstas=mpstas, altitude_m=altitude_m)
+        return mach
+
+    def EAS_TAS(self, eas, altitude_m):
         """
         Converts EAS to TAS at a given altitude.
 
-        The method first calculates the density ratio (the ratio of ambient
-        density at altitude to the ambient density at sea level). Since
-        equivalent airspeed is the airspeed at sea-level which produces the same
-        dynamic pressure that true airspeed does at altitude, we simply correct
-        EAS by the density ratio.
-
         Args:
-            eas: The equivalent airspeed.
-            altitude_m: Geopotential altitudes at which the temperature is to
-                be interrogated (float or array of floats).
+            eas: The equivalent airspeed, in any valid unit of speed.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
 
         Returns:
             True airspeed in the same unit as the input.
@@ -856,83 +978,91 @@ class Atmosphere:
         dratio = self.airdens_kgpm3(altitude_m) / self.airdens_kgpm3(0)
         return eas / np.sqrt(dratio)
 
-    def tas2eas(self, tas, altitude_m):
+    def EAS_CAS(self, mpseas, altitude_m):
         """
-        Convert TAS to EAS at a given altitude.
+        Converts EAS to CAS at a given altitude.
 
         Args:
-            tas: The true airspeed.
+            mpseas: The equivalent airspeed, in metres per second.
             altitude_m: Geopotential altitudes at which the temperature is to
                 be interrogated (float or array of floats).
 
         Returns:
-            Equivalent airspeed in the same unit as the input.
+            Calibrated airspeed, in metres per second.
 
         """
-        dratio = self.airdens_kgpm3(altitude_m) / self.airdens_kgpm3(0)
-        return tas * np.sqrt(dratio)
+        mpstas = self.EAS_TAS(eas=mpseas, altitude_m=altitude_m)
+        mpscas = self.TAS_CAS(mpstas=mpstas, altitude_m=altitude_m)
 
-    def mpseas2mpscas(self, mpseas, altitude_m):
+        return mpscas
+
+    def CAS_Mach(self, mpscas, altitude_m):
         """
-        Convert EAS (m/s) to CAS (m/s) at a given altitude (m).
-
-        The relationship between the two depends on the Mach number M and the
-        ratio of ambient air pressure at the current altitude to that of sea
-        level. The relationship is approximated using:
-
-        delta = p_alt / p_sl
-        CAS ~ EAS * (1 + (1-delta)/8 * M^2 + 3 * (1-10delta+9delta^2)/640 * M^4)
+        Convert CAS to Mach at a given altitude.
 
         Args:
-            mpseas: Equivalent airspeed, in metres per second.
-            altitude_m: Geopotential altitudes at which the temperature is to
-                be interrogated (float or array of floats).
+            mpscas: Calibrated airspeed, in metres per second.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
 
         Returns:
-            A tuple (calibrated airspeed, Mach number), where calibrated
-            airspeed is given in metres per second.
+            Mach number.
 
         """
-        # Note: unit specific, as the calculation requires Mach no.
-        mpstas = self.eas2tas(mpseas, altitude_m)
-        machno = self.mach(mpstas, altitude_m)
-        delta = self.airpress_pa(altitude_m) / self.airpress_pa()
-        m2_term = (1.0 / 8.0) * (1 - delta) * (machno ** 2)
-        m4_term = (3.0 / 640.0) * (1 - 10 * delta + 9 * (delta ** 2)) * (
-                machno ** 4)
-        return mpseas * (1 + m2_term + m4_term), machno
+        # Flow speed to representative Mach, from isentropic flow relations
+        vsound_mps = self.vsound_mps(altitude_m=0)
+        mach_r = mpscas / vsound_mps
 
-    def keas2kcas(self, keas, altitude_m):
+        # Static to total pressure ratio, from isentropic flow relations
+        exponent = -GAMMA_DRY_AIR / (GAMMA_DRY_AIR - 1)
+        p_pt = (1 + (GAMMA_DRY_AIR - 1) / 2 * mach_r ** 2) ** exponent
+
+        # Convert using p0 to dynamic pressure
+        p0 = 101_325
+        qc = p0 * (1 / p_pt - 1)
+
+        # Evaluate this dynamic pressure at conditions with the same relations
+        pstatic = self.airpress_pa(altitude_m=altitude_m)
+        p_pt = pstatic / (pstatic + qc)
+
+        # Isentropic flow relations back to speed
+        exponent = 1 / exponent
+        mach = ((p_pt ** exponent - 1) * 2 / (GAMMA_DRY_AIR - 1)) ** 0.5
+
+        return mach
+
+    def CAS_TAS(self, mpscas, altitude_m):
         """
-        Converts equivalent airspeed into calibrated airspeed.
+        Convert CAS to TAS at a given altitude.
 
         Args:
-            keas: Equivalent airspeed, in knots.
-            altitude_m: Geopotential altitudes at which the temperature is to
-                be interrogated (float or array of floats).
+            mpscas: Calibrated airspeed, in metres per second.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
 
         Returns:
-            A tuple (kcas, Machno), where kcas is the calibrated airspeed in
-            knots and Machno is the Mach number.
-
-        Examples:
-
-            >>> isa = Atmosphere()
-
-            >>> keas = np.array([100, 200, 300])
-            >>> altitude_m = co.ft_m(40_000)
-
-            >>> kcas, mach = isa.keas2kcas(keas, altitude_m)
-            >>> print(kcas)
-            [101.25392563 209.93839073 333.01861569]
+            True airspeed, in metres per second.
 
         """
-        # Note: unit specific, as the calculation requires Mach no.
-        np.asarray(keas)
-        mpseas = co.kts_mps(keas)
-        mpscas, machno = self.mpseas2mpscas(mpseas, altitude_m)
-        kcas = co.mps_kts(mpscas)
-        return kcas, machno
+        mach = self.CAS_Mach(mpscas=mpscas, altitude_m=altitude_m)
+        mpstas = self.Mach_TAS(mach=mach, altitude_m=altitude_m)
+
+        return mpstas
+
+    def CAS_EAS(self, mpscas, altitude_m):
+        """
+        Convert CAS to EAS at a given altitude.
+
+        Args:
+            mpscas: Calibrated airspeed, in metres per second.
+            altitude_m: Geopotential altitude above mean sea level, in metres.
+
+        Returns:
+            Equivalent airspeed, in metres per second.
+
+        """
+        mach = self.CAS_Mach(mpscas=mpscas, altitude_m=altitude_m)
+        mpseas = self.Mach_EAS(mach=mach, altitude_m=altitude_m)
+
+        return mpseas
 
 
 def mil_hdbk_310(high_or_low: str, temp_or_dens: str, alt_km: int):

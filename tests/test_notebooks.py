@@ -10,7 +10,7 @@ from nbclient.exceptions import CellExecutionError
 
 class RunNotebooks(unittest.TestCase):
 
-    def test_notebooks(self, write_out: bool = False):
+    def test_notebooks(self, write_out: bool = True):
         """
         Tries to run all the code in the notebooks as texts. If it can't, the
         notebook is copied over anyway.

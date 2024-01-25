@@ -29,12 +29,11 @@ class CSIABaseAeroplanes:
     _make_Vn_data: typing.Callable
 
     def __init__(
-            self, concept: ca.AircraftConcept, wingarea_m2: float,
+            self, concept: ca.AircraftConcept,
             category: typing.Union[list[str], str] = None):
         """
         Args:
             concept: Aircraft concept, as per the constraintsanalysis module.
-            wingarea_m2: The concept's wing area, in metres squared.
             category: A string, or list of strings describing desired
                 certification categories.
 
@@ -64,7 +63,6 @@ class CSIABaseAeroplanes:
             raise ValueError(errormsg)
 
         self.categories = category
-        self.wingarea_m2 = wingarea_m2
 
         return
 
@@ -173,6 +171,40 @@ class CSIABaseAeroplanes:
         ys_manoeuvre = np.hstack((ys_u_mano, ys_l_mano[::-1]))
 
         return xs, ys_combined, ys_manoeuvre
+
+    @property
+    def VS1(self) -> float:
+        """MTOW stall speed for clean configuration, in KCAS."""
+        VS1 = self.concept.brief.vstallclean_kcas
+        if VS1 is None:
+            raise ValueError("'vstallclean_kcas' was not defined in the brief")
+        return VS1
+
+    @property
+    def VS0(self) -> float:
+        """MTOW stall speed for high-lift configuration, in KCAS."""
+
+        # 0.5 * rho * VS0^2 * S_HL * CLmaxHL == 0.5 * rho * VS1^2 * S * CLmax
+        # --> VS0^2 * S_HL * CLmaxHL == VS1^2 * S * CLmax
+        # --> VS0^2 == VS1^2 * (S / S_HL) * (CLmax / CLmaxHL)
+
+        # Skip the warnings from trying to access undefined attributes
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if self.concept.performance.CLmax is None:
+                return np.nan
+            CLmax = self.concept.performance.CLmax
+
+            if self.concept.performance.CLmaxHL is None:
+                return np.nan
+            CLmaxHL = self.concept.performance.CLmaxHL
+
+        # Assume that ratio of wing area to high-lift wing area (S / S_HL) is 1
+        # for aircraft --> (S / S_HL) == 1.0
+        VS1 = self.paragraph49_b_VS1
+        VS0 = (VS1 ** 2 * 1.0 * (CLmax / CLmaxHL)) ** 0.5
+
+        return VS0
 
     def plot_Vn(self, altitude_m=None, weightfraction=None, N=None):
         """
@@ -363,7 +395,8 @@ class CS23Amendment4(CSIABaseAeroplanes):
         CLmin = self.concept.performance.CLmin
         designatm = self.concept.designatm
         funcs_ngminus1 = self.paragraph341_c_ngminus1
-        wslim_pa = self.concept.design.weight_n / self.wingarea_m2  # MTOW (W/S)
+        # MTOW (W/S)
+        wslim_pa = self.concept.design.weight_n / self.concept.cleanstall_Smin
 
         for i in range(altitude_m.size):
             alt_m = altitude_m.flat[i]
@@ -376,7 +409,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
             def loadfactor(keas, CL):
                 """Compute load factor n for equivalent airspeed and CL."""
                 # Compute true airspeed
-                ktas = designatm.eas2tas(eas=keas, altitude_m=alt_m)
+                ktas = designatm.EAS_TAS(eas=keas, altitude_m=alt_m)
                 mpstas = uc.kts_mps(speed_kts=ktas)
 
                 # L/W = n = q * CL / (W/S)
@@ -584,13 +617,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
             Aircraft MTOW clean-configuration stalling speed, in knots CAS.
 
         """
-        # Clean, level flight stall speed VS from flight tests (use the brief)
-        if self.concept.brief.vstallclean_kcas is not None:
-            VS = self.concept.brief.vstallclean_kcas
-        else:
-            raise ValueError("'vstallclean_kcas' was not set!")
-
-        return VS
+        return self.VS1
 
     @property
     def paragraph49_b_VS0(self) -> float:
@@ -602,27 +629,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
             Aircraft MTOW landing-configuration stalling speed, in knots CAS.
 
         """
-        # 0.5 * rho * VS0^2 * S_HL * CLmaxHL == 0.5 * rho * VS1^2 * S * CLmax
-        # --> VS0^2 * S_HL * CLmaxHL == VS1^2 * S * CLmax
-        # --> VS0^2 == VS1^2 * (S / S_HL) * (CLmax / CLmaxHL)
-
-        # Skip the warnings from trying to access undefined attributes
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            if self.concept.performance.CLmax is None:
-                return np.nan
-            CLmax = self.concept.performance.CLmax
-
-            if self.concept.performance.CLmaxHL is None:
-                return np.nan
-            CLmaxHL = self.concept.performance.CLmaxHL
-
-        # Assume that ratio of wing area to high-lift wing area (S / S_HL) is 1
-        # for CS-23 aircraft --> (S / S_HL) == 1.0
-        VS1 = self.paragraph49_b_VS1
-        VS0 = (VS1 ** 2 * 1.0 * (CLmax / CLmaxHL)) ** 0.5
-
-        return VS0
+        return self.VS0
 
     @property
     def paragraph333_c_Ude(self) -> dict[str, dict[str, typing.Callable]]:
@@ -664,7 +671,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
         # Item (1)
         alt_m = self.concept.brief.cruisealt_m
         VC_ktas = self.concept.brief.cruisespeed_ktas
-        VC_keas = self.concept.designatm.tas2eas(tas=VC_ktas, altitude_m=alt_m)
+        VC_keas = self.concept.designatm.TAS_EAS(tas=VC_ktas, altitude_m=alt_m)
 
         for (category, VCmin_keas) in self.paragraph335_a_VCmin.items():
             output[category] = VCmin_keas <= VC_keas
@@ -699,7 +706,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
         # Otherwise, knowledge of VC should imply knowledge of cruise altitude
         if alt_m is None:
             raise ValueError("Cruise speed was given in brief, but no altitude")
-        VC_keas = self.concept.designatm.tas2eas(tas=VC_ktas, altitude_m=alt_m)
+        VC_keas = self.concept.designatm.TAS_EAS(tas=VC_ktas, altitude_m=alt_m)
 
         # Items (1) and (2)
         for (category, _) in output.items():
@@ -736,7 +743,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
 
         # Items (1) and (2)
         W = self.concept.design.weight_n
-        S = self.wingarea_m2
+        S = self.concept.cleanstall_Smin
         ws_lbfpft2 = uc.Pa_lbfft2(W / S)
 
         for (category, _) in output.items():
@@ -792,7 +799,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
         # Items (2) and (3)
         VCmin_keas = self.paragraph335_a_VCmin
         W = self.concept.design.weight_n
-        S = self.wingarea_m2
+        S = self.concept.cleanstall_Smin
         ws_lbfpft2 = uc.Pa_lbfft2(W / S)
 
         factors = {"utility": 1.50, "aerobatic": 1.55}
@@ -886,7 +893,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
         # Item (2)
         alt_m = self.concept.brief.cruisealt_m
         VC_ktas = self.concept.brief.cruisespeed_ktas
-        VC_keas = self.concept.designatm.tas2eas(tas=VC_ktas, altitude_m=alt_m)
+        VC_keas = self.concept.designatm.TAS_EAS(tas=VC_ktas, altitude_m=alt_m)
 
         output = {category: VC_keas for (category, _) in output.items()}
 
@@ -978,7 +985,8 @@ class CS23Amendment4(CSIABaseAeroplanes):
         output = self._new_categories_dict()
 
         # Aeroplane mean geometric chord
-        Cbar = (self.wingarea_m2 / self.concept.design.aspectratio) ** 0.5
+        Cbar = (self.concept.cleanstall_Smin
+                / self.concept.design.aspectratio) ** 0.5
 
         CLalpha = self.concept.performance.CLalpha
         rho0 = self.concept.designatm.airdens_kgpm3(altitude_m=0.0)
@@ -1116,9 +1124,9 @@ class CS25Amendment28(CSIABaseAeroplanes):
                 CLmaxHL = self.concept.performance.CLmaxHL
         CLmin = self.concept.performance.CLmin
         designatm = self.concept.designatm
-        # TODO: Replace this with the actual one for CS25
         funcs_ngminus1 = self.ngminus1
-        wslim_pa = self.concept.design.weight_n / self.wingarea_m2  # MTOW (W/S)
+        # MTOW (W/S)
+        wslim_pa = self.concept.design.weight_n / self.concept.cleanstall_Smin
 
         for i in range(altitude_m.size):
             alt_m = altitude_m.flat[i]
@@ -1131,7 +1139,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
             def loadfactor(keas, CL):
                 """Compute load factor n for equivalent airspeed and CL."""
                 # Compute true airspeed
-                ktas = designatm.eas2tas(eas=keas, altitude_m=alt_m)
+                ktas = designatm.EAS_TAS(eas=keas, altitude_m=alt_m)
                 mpstas = uc.kts_mps(speed_kts=ktas)
 
                 # L/W = n = q * CL / (W/S)
@@ -1152,8 +1160,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
                 VGmano = self.paragraph335_c_VGmin[category](wfrac)
                 VF = self.paragraph335_e_VFmin
                 # Stall (and inverted stall) speed
-                # TODO: Make stall speed recall more rigorous
-                VS = self.concept.brief.vstallclean_kcas * (wfrac ** 0.5)
+                VS = self.VS1 * (wfrac ** 0.5)
                 VSi = VS * (CLmax / abs(CLmin)) ** 0.5
 
                 # Find VA gust point (where stall curve meets the VC gust line)
@@ -1301,7 +1308,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
 
         # Otherwise, knowledge of VC should imply knowledge of cruise altitude
         alt_m = self.concept.brief.cruisealt_m
-        VC_keas = self.concept.designatm.tas2eas(tas=VC_ktas, altitude_m=alt_m)
+        VC_keas = self.concept.designatm.TAS_EAS(tas=VC_ktas, altitude_m=alt_m)
 
         # Item (2)
         if VC_keas < VCmin:
@@ -1406,7 +1413,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
 
         # Item (1)
         n1 = self.paragraph337_b_n1["large"]
-        VS = self.concept.brief.vstallclean_kcas  # conflate KCAS and KEAS
+        VS = self.VS1  # conflate KCAS and KEAS
 
         def get_VAmin(weightfraction=None):
             """Given manoeuvre load factor (and weight fraction), get VAmin."""
@@ -1434,7 +1441,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
 
         # Item (1)
         n = self.paragraph337_b_n2["large"]
-        VS = self.concept.brief.vstallclean_kcas  # conflate KCAS and KEAS
+        VS = self.VS1  # conflate KCAS and KEAS
         CLmax = self.concept.performance.CLmax
         CLmin = self.concept.performance.CLmin
         VSi = (VS ** 2 * CLmax / abs(CLmin)) ** 0.5
@@ -1466,7 +1473,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
         weightfraction = 1.0 if weightfraction is None else weightfraction
 
         # Clean stall speed at weight of consideration (in KEAS)
-        VS1_keas = self.concept.brief.vstallclean_kcas  # conflate KCAS and KEAS
+        VS1_keas = self.VS1  # conflate KCAS and KEAS
         VS1_keas = weightfraction ** 0.5 * VS1_keas
 
         # Cruise speed (in KEAS)
@@ -1474,18 +1481,19 @@ class CS25Amendment28(CSIABaseAeroplanes):
         VC_ktas = self.concept.brief.cruisespeed_ktas
         if alt_m is None or VC_ktas is None:
             raise ValueError("Cruise conditions weren't fully defined")
-        VC_keas = self.concept.designatm.tas2eas(tas=VC_ktas, altitude_m=alt_m)
+        VC_keas = self.concept.designatm.TAS_EAS(tas=VC_ktas, altitude_m=alt_m)
 
         # Reference gust velocity (in feet per second)
         Uref = self.paragraph341_a_Uref["large"]["B"](altitude_m)
 
         # Aeroplane mean geometric chord
-        Cbar = (self.wingarea_m2 / self.concept.design.aspectratio) ** 0.5
+        Cbar = (self.concept.cleanstall_Smin
+                / self.concept.design.aspectratio) ** 0.5
 
         CLalpha = self.concept.performance.CLalpha
 
         # Average MTOW wing loading
-        wsMTOW = self.concept.design.weight_n / self.wingarea_m2
+        wsMTOW = self.concept.design.weight_n / self.concept.cleanstall_Smin
         ws = wsMTOW * weightfraction
 
         # Aeroplane mass ratio
@@ -1511,8 +1519,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
 
         """
         # MTOW stall, clean-config
-        # TODO: Make stall speed recall more rigorous
-        VS1 = self.concept.brief.vstallclean_kcas
+        VS1 = self.VS1
 
         # MTOW stall, landing-config
         CLmax = self.concept.performance.CLmax
@@ -1669,16 +1676,16 @@ class CS25Amendment28(CSIABaseAeroplanes):
             above mean sea level, and the applicable wing loading in Pascal.
 
         Notes:
-            Author here: I don't even know if any of this applies to part 25.
-            Surely and intuitively, you would want to provision for gusts and
-            turbulent effects on aircraft. There's even a section in part 25 on
-            the gust loading of engine mounts. But there seems to be nothing on
-            how to actually evaluate gust loading on the airframe itself, and
-            no obvious equations in part 25. So here, I have recycled CS 23...
+            Author here: Intuitively, provisions for gusts and turbulence are
+            required as part of the CS 25 specification. There's a section in
+            part 25 on turbulent effects on aircraft, and hust loads on engine
+            mounts. However, there appears to be nothing in the way of
+            discussion on formulae to use in preliminary evaluation of gust
+            load factors, and so I have recycled the implementation of CS 23.
 
         """
         # Aeroplane mean geometric chord
-        Cbar = (self.wingarea_m2 / self.concept.design.aspectratio) ** 0.5
+        Cbar = (self.concept.cleanstall_Smin / self.concept.design.aspectratio) ** 0.5
 
         CLalpha = self.concept.performance.CLalpha
         rho0 = self.concept.designatm.airdens_kgpm3(altitude_m=0.0)

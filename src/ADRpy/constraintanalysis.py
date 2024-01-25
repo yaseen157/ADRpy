@@ -1447,7 +1447,7 @@ class AircraftConcept:
 
         # Determine the thrust and power lapse corrections
         climbspeed_mpsias = co.kts_mps(climbspeed_kias)
-        climbspeed_mpstas = self.designatm.eas2tas(
+        climbspeed_mpstas = self.designatm.EAS_TAS(
             eas=climbspeed_mpsias,
             altitude_m=climbalt_m
         )
@@ -1479,7 +1479,7 @@ class AircraftConcept:
 
         # ... load factor due to climb
         climbrate_mps = co.fpm_mps(climbrate_fpm)
-        climbrate_mpstroc = self.designatm.eas2tas(
+        climbrate_mpstroc = self.designatm.EAS_TAS(
             eas=climbrate_mps, altitude_m=climbalt_m)
         cos_theta = (1 - (climbrate_mpstroc / climbspeed_mpstas) ** 2) ** 0.5
 
@@ -1609,7 +1609,7 @@ class AircraftConcept:
 
         # Determine the thrust and power lapse corrections
         secclimbspd_mpsias = co.kts_mps(secclimbspd_kias)
-        secclimbspd_mpstas = self.designatm.eas2tas(
+        secclimbspd_mpstas = self.designatm.EAS_TAS(
             eas=secclimbspd_mpsias,
             altitude_m=servceil_m
         )
@@ -1644,7 +1644,7 @@ class AircraftConcept:
         # climb speed) dropping to 100feet/min ~ 0.508m/s
         climbrate_mps = co.fpm_mps(100)
         # What true climb rate does 100 feet/minute correspond to?
-        climbrate_mpstroc = self.designatm.eas2tas(
+        climbrate_mpstroc = self.designatm.EAS_TAS(
             eas=climbrate_mps, altitude_m=servceil_m)
         cos_theta = (1 - (climbrate_mpstroc / secclimbspd_mpstas) ** 2) ** 0.5
 
