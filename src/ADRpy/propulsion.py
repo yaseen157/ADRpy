@@ -559,6 +559,8 @@ class TurbofanHiBPR:
         slice = theta0 > TR
         lapse[slice] -= (delta0 * 3 * (theta0 - TR) / (1.5 + mach))[slice]
 
+        lapse[~(mach < 0.9)] = np.nan  # Invalidate M >= 0.9
+
         return np.clip(lapse, 0, None)
 
     @classmethod
