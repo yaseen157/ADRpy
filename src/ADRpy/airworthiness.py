@@ -95,6 +95,14 @@ class CSIABaseAeroplanes:
             plot, or just the manoeuvre plot.
 
         """
+        # The point of masks is that we can compute the load for a discrete
+        # and finite number of (equally spaced) speeds, as if they were
+        # coordinates. Instead of presenting a user with every single one of
+        # these loading curves for the entire range of speeds, we use masks
+        # to selectively apply and view relevant parts of the curve. For
+        # example, the following "mask_O_B" is the mask to apply to any curve
+        # if we only want to see it between the origin and envelope point B.
+
         # Create masks for the upper half of the V-n diagram
         mask_O_B = (0.0 <= Vndata.V.xs) & (Vndata.V.xs < Vndata.V.B)
         mask_O_C = (0.0 <= Vndata.V.xs) & (Vndata.V.xs < Vndata.V.C)
@@ -111,37 +119,42 @@ class CSIABaseAeroplanes:
 
         # Extract manoeuvre ONLY data using masks
         ys_u_mano = np.hstack((
-            Vndata.n.S_A[mask_O_S] * np.nan,
-            Vndata.n.S_A[mask_S_A],
-            Vndata.n.A_D[mask_A_C | mask_C_D])
+            Vndata.n.S_A[mask_O_S] * np.nan,  # Blot out curves from O to S
+            Vndata.n.S_A[mask_S_A],  # The stall curve
+            Vndata.n.A_D[mask_A_C | mask_C_D])  # Manoeuvre point to dive
         )
         ys_l_mano = np.hstack((
-            Vndata.n.Si_G[mask_O_Si] * np.nan,
-            Vndata.n.Si_G[mask_Si_G],
-            Vndata.n.G_F[mask_G_F],
-            Vndata.n.F_E[mask_F_E]
+            Vndata.n.Si_G[mask_O_Si] * np.nan,  # Blot out curves from O to Si
+            Vndata.n.Si_G[mask_Si_G],  # The inverted flight stall curve
+            Vndata.n.G_F[mask_G_F],  # Manoeuvre to (inverted) design cruise spd
+            Vndata.n.F_E[mask_F_E]  # (inverted) design cruise spd to dive
         ))
 
-        # Extract gust ONLY data using masks
+        # w1 is a linear interpolating weight that transitions load values from
+        # point C/F to point D/E - this is how you draw the gust envelope
         w1 = (Vndata.V.xs - Vndata.V.C) / (Vndata.V.D - Vndata.V.C)
+
+        # Extract gust data using masks, and modify where necessary for plotting
+        # ... if there is no type B gust, the gust upper limit is the type C one
         if np.isnan(Vndata.V.B):
             ys_u_gust = np.hstack((
                 Vndata.ng.O_C[:, 0][mask_O_C],
                 1 + (Vndata.ng.C_m1 * (1 - w1) + Vndata.ng.D_m1 * w1)[mask_C_D]
             ))
+        # ... if gust penetration speed B is less than design cruise speed C
         elif Vndata.V.B < Vndata.V.C:
-            # mask_B_C bridges the gap in the diagram between VB and VC;
-            mask_B_C = (mask_O_B != mask_O_C)
-
+            mask_B_C = (mask_O_B != mask_O_C)  # Mask from B to C
+            # w2 is a new weight required to interpolate from point B to C
             w2 = (Vndata.V.xs - Vndata.V.B) / (Vndata.V.C - Vndata.V.B)
             ys_u_gust = np.hstack((
-                Vndata.ng.O_B[:, 0][mask_O_B],
+                np.min([Vndata.n.S_A, Vndata.ng.O_B[:, 0]], axis=0)[mask_O_B],
                 1 + (Vndata.ng.B_m1 * (1 - w2) + Vndata.ng.C_m1 * w2)[mask_B_C],
                 1 + (Vndata.ng.C_m1 * (1 - w1) + Vndata.ng.D_m1 * w1)[mask_C_D]
             ))
+        # ... if VC is less than VB, we are still required to penetrate the gust
         else:
-            # VC <= VB, but we still need to penetrate gust
-            mask_B_D = ~mask_O_B
+            mask_B_D = ~mask_O_B  # Mask from B to D
+            # w2 is a new weight required to interpolate from point B to D
             w2 = (Vndata.V.xs - Vndata.V.B) / (Vndata.V.D - Vndata.V.B)
             Bgustline = Vndata.ng.O_B[:, 0]  # Original 66~38 fps gust line
             capped = Vndata.n.S_A[mask_O_B]  # ... cap it to the stall curve
@@ -201,12 +214,12 @@ class CSIABaseAeroplanes:
 
         # Assume that ratio of wing area to high-lift wing area (S / S_HL) is 1
         # for aircraft --> (S / S_HL) == 1.0
-        VS1 = self.paragraph49_b_VS1
+        VS1 = self.VS1
         VS0 = (VS1 ** 2 * 1.0 * (CLmax / CLmaxHL)) ** 0.5
 
         return VS0
 
-    def plot_Vn(self, altitude_m=None, weightfraction=None, N=None):
+    def plot_Vn(self, altitude_m=None, weightfraction: float =None, N: int=None):
         """
         Make a pretty figure with the limit manoeuvre and the limit gust
         envelopes.
@@ -215,7 +228,7 @@ class CSIABaseAeroplanes:
             altitude_m: Altitudes at which to consider the V-n diagram.
             weightfraction: Weight fractions at which to consider calculations.
             N: The number of coordinates to discretise the velocity axis of the
-                V-n diagram.
+                V-n diagram. Optional, defaults to 300.
 
         Returns:
             A tuple of the matplotlib (Figure, Axes) objects used to plot all
@@ -230,7 +243,7 @@ class CSIABaseAeroplanes:
         # Recast as necessary
         altitude_m = 0 if altitude_m is None else altitude_m
         weightfraction = 1.0 if weightfraction is None else weightfraction
-        N = 100 if N is None else int(2 * np.ceil(N / 2))  # Multiple of 2
+        N = 300 if N is None else int(2 * np.ceil(N / 2))  # Multiple of 2
 
         # Get V-n plot data, and then extract categories relevant to the concept
         altitude_m, weightfraction, data \
@@ -356,7 +369,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
             altitude_m: Altitude of operation.
             weightfraction: Fraction of MTOW at which V-n should be considered.
             N: The number of x-coordinates to generate (discretising speeds from
-             V=0 to dive speed, VD). Optional, defaults to 100 points.
+             V=0 to dive speed, VD). Optional, defaults to 300 points.
 
         Returns:
             A tuple (altitude_m, weightfraction, Vndata), where the input arrays
@@ -371,7 +384,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
             altitude_m = 0
         if weightfraction is None:
             weightfraction = 1.0
-        N = 100 if N is None else int(N)
+        N = 300 if N is None else int(N)
 
         altitude_m = actools.recastasnpfloatarray(altitude_m)
         weightfraction = actools.recastasnpfloatarray(weightfraction)
@@ -1086,7 +1099,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
             altitude_m: Altitude of operation.
             weightfraction: Fraction of MTOW at which V-n should be considered.
             N: The number of x-coordinates to generate (discretising speeds from
-             V=0 to dive speed, VD). Optional, defaults to 100 points.
+             V=0 to dive speed, VD). Optional, defaults to 300 points.
 
         Returns:
             A tuple (altitude_m, weightfraction, Vndata), where the input arrays
@@ -1101,7 +1114,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
             altitude_m = 0
         if weightfraction is None:
             weightfraction = 1.0
-        N = 100 if N is None else int(N)
+        N = 300 if N is None else int(N)
 
         altitude_m = actools.recastasnpfloatarray(altitude_m)
         weightfraction = actools.recastasnpfloatarray(weightfraction)
