@@ -1077,7 +1077,7 @@ class AircraftConcept:
         return cdi_factor
 
     @revert2scalar
-    def get_bestV_BG(self, wingloading_pa, altitude_m=None):
+    def get_V_BG(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, VBG, which results in best gliding performance
         (maximised operating L/D).
@@ -1088,7 +1088,7 @@ class AircraftConcept:
                 sea-level (0 metres).
 
         Returns:
-            Best speed for glide VBG, in metres per second.
+            Best speed for glide VBG, in metres per second (TAS).
 
         References:
             Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
@@ -1108,7 +1108,7 @@ class AircraftConcept:
             np.broadcast_arrays(wingloading_pa, altitude_m)
 
         # The bestCL range/endurance functions maximise CL/CD @ constant speed V
-        bestCL, _ = self.get_bestCL_range(constantspeed=True)
+        bestCL, _ = self.get_CL_range(constantspeed=True)
 
         rho_kgpm3 = self.designatm.airdens_kgpm3(altitude_m)
         bestspeed_mps = (2 / rho_kgpm3 * wingloading_pa / bestCL) ** 0.5
@@ -1116,7 +1116,7 @@ class AircraftConcept:
         return bestspeed_mps
 
     @revert2scalar
-    def get_bestV_CAR(self, wingloading_pa, altitude_m=None):
+    def get_V_CAR(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, VCAR, which results in best jet range. This is also
         known as Carson's speed, for jet and propeller aircraft.
@@ -1127,7 +1127,7 @@ class AircraftConcept:
                 sea-level (0 metres).
 
         Returns:
-            Best speed for jet range VCAR, in metres per second.
+            Best speed for jet range VCAR, in metres per second (TAS).
 
         References:
             Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
@@ -1143,7 +1143,7 @@ class AircraftConcept:
 
         # Gudmundsson, eq. (19-22)
         # The bestCL range function maximise CL**0.5/CD @ variable speed V
-        bestCL, _ = self.get_bestCL_range(constantspeed=False)
+        bestCL, _ = self.get_CL_range(constantspeed=False)
 
         rho_kgpm3 = self.designatm.airdens_kgpm3(altitude_m)
         bestspeed_mps = (2 / rho_kgpm3 * wingloading_pa / bestCL) ** 0.5
@@ -1151,7 +1151,7 @@ class AircraftConcept:
         return bestspeed_mps
 
     @revert2scalar
-    def get_bestV_X(self, wingloading_pa, altitude_m=None):
+    def get_V_X(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, VX, which results in the best angle of climb.
 
@@ -1161,7 +1161,7 @@ class AircraftConcept:
                 sea-level (0 metres).
 
         Returns:
-            Best climb angle speed VX, in metres per second.
+            Best climb angle speed VX, in metres per second (TAS).
 
         References:
             Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
@@ -1183,7 +1183,7 @@ class AircraftConcept:
 
         if self.propulsion.type in ["turbofan", "turbojet"]:
 
-            bestCL, LDmax = self.get_bestCL_endurance(constantspeed=True)
+            bestCL, LDmax = self.get_CL_endurance(constantspeed=True)
             densfactor = 2 / rho_kgpm3
 
             def f_obj(VX, i):
@@ -1244,7 +1244,7 @@ class AircraftConcept:
         return bestspeed_mps
 
     @revert2scalar
-    def get_bestV_Y(self, wingloading_pa, altitude_m=None):
+    def get_V_Y(self, wingloading_pa, altitude_m=None):
         """
         Estimate the speed, VY, which results in the best rate of climb.
 
@@ -1254,7 +1254,7 @@ class AircraftConcept:
                 sea-level (0 metres).
 
         Returns:
-            Best rate of climb speed VY, in metres per second.
+            Best rate of climb speed VY, in metres per second (TAS).
 
         References:
             Gudmundsson, S., "General Aviation Aircraft Design: Applied Methods
@@ -1281,7 +1281,7 @@ class AircraftConcept:
         if self.propulsion.type in ["turbofan", "turbojet"]:
 
             wsfactor = wingloading_pa / 3 / rho_kgpm3 / CDmin
-            bestCL, LDmax = self.get_bestCL_endurance(constantspeed=True)
+            bestCL, LDmax = self.get_CL_endurance(constantspeed=True)
 
             def f_obj(VY, i):
                 """Helper func: Objective function. Accepts guess of VY."""
@@ -1315,7 +1315,7 @@ class AircraftConcept:
             # We need to maximise specific excess power
             # ... which happens when we minimise power required
             # ... which happens in eq. (20-21) at best endurance condition
-            bestCL, _ = self.get_bestCL_endurance(constantspeed=False)
+            bestCL, _ = self.get_CL_endurance(constantspeed=False)
             bestspeed_mps = (2 / rho_kgpm3 * wingloading_pa / bestCL) ** 0.5
 
             return bestspeed_mps
@@ -1323,7 +1323,7 @@ class AircraftConcept:
         raise NotImplementedError("Unsupported propulsion system type")
 
     @revert2scalar
-    def get_bestCL_range(self, constantspeed: bool = None) -> tuple:
+    def get_CL_range(self, constantspeed: bool = None) -> tuple:
         """
         Finds the best CL (and L/D ratio) for the cruising conditions that
         maximise range in constant attitude cruise profiles.
@@ -1367,7 +1367,7 @@ class AircraftConcept:
         return bestCL, LDratio
 
     @revert2scalar
-    def get_bestCL_endurance(self, constantspeed: bool = None) -> tuple:
+    def get_CL_endurance(self, constantspeed: bool = None) -> tuple:
         """
         Finds the best CL (and L/D ratio) for the cruising conditions that
         maximise endurance in constant attitude cruise profiles.

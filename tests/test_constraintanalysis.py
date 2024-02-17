@@ -100,15 +100,15 @@ class TestConceptCirrusSR22(unittest.TestCase):
 
     def test_get_bestspeeds(self):
         # Carson's speed
-        VCAR = self.ac.get_bestV_CAR(self.ws)
+        VCAR = self.ac.get_V_CAR(self.ws)
         # VCAR_ktas = uc.mps_kts(VCAR)
 
         # Best glide speed (and range for propeller aircraft)
-        VBG = self.ac.get_bestV_BG(self.ws)
+        VBG = self.ac.get_V_BG(self.ws)
         # VBG_ktas = uc.mps_kts(VBG)
 
         # Best climb rate speed
-        VY = self.ac.get_bestV_Y(self.ws)
+        VY = self.ac.get_V_Y(self.ws)
         # VY_ktas = uc.mps_kts(VY)
 
         self.assertGreater(VCAR, VBG)  # Carson's speed is always faster than BG
@@ -119,19 +119,19 @@ class TestConceptCirrusSR22(unittest.TestCase):
     def test_get_bestCLs(self):
         # CL for range, constant speed (variable altitude)
         # Optimise CL / CD
-        CL_r1, LD_r1 = self.ac.get_bestCL_range(constantspeed=True)
+        CL_r1, LD_r1 = self.ac.get_CL_range(constantspeed=True)
 
         # CL for range, variable speed (constant altitude)
         # Optimise sqrt(CL) / CD
-        CL_r2, LD_r2 = self.ac.get_bestCL_range(constantspeed=False)
+        CL_r2, LD_r2 = self.ac.get_CL_range(constantspeed=False)
 
         # CL for endurance, constant speed (variable altitude)
         # Optimise CL / CD
-        CL_e1, LD_e1 = self.ac.get_bestCL_endurance(constantspeed=True)
+        CL_e1, LD_e1 = self.ac.get_CL_endurance(constantspeed=True)
 
         # CL for endurance, variable speed (constant altitude)
         # Optimise CL^1.5 / CD (for propeller aircraft only, otherwise CL / CD)
-        CL_e2, LD_e2 = self.ac.get_bestCL_endurance(constantspeed=False)
+        CL_e2, LD_e2 = self.ac.get_CL_endurance(constantspeed=False)
 
         # Each optimal result should be the best at its own CL^power / CD
         self.assertGreater(LD_r1, LD_r2)
