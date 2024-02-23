@@ -1,6 +1,6 @@
 <!--
     Aircraft Design Recipes in Python (ADRpy)
-    Copyright (C) 2023  András Sóbesteer
+    Copyright (C) 2023  András Sóbester
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by

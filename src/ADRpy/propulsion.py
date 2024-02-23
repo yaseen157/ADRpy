@@ -915,6 +915,8 @@ class Turboprop:
                 (delta0 * 3 * (theta0 - TR) / 8.13 / (mach - 0.1))[slice]
             lapse[mach <= 0.1] = delta0[mach <= 0.1]
 
+        lapse[~(mach < 0.9)] = np.nan  # Invalidate M >= 0.9
+
         return np.clip(lapse, 0, None)
 
     @classmethod
@@ -966,6 +968,44 @@ class Turboprop:
         tsfc = (0.18 + 0.80 * mach) * theta ** 0.5
 
         return tsfc, tsfc * np.nan  # <-- preserves shape of tsfc in nan
+
+    @classmethod
+    def shaftpower(cls, mach, altitude_m, *, norm: bool = True, **kwargs):
+        """
+        Return the shaft power available at the given flight conditions.
+
+        Args:
+            mach: Flight Mach number.
+            altitude_m: Flight level (above mean sea level), in metres.
+            norm: For generic propulsion system types, this must be set to True.
+
+        Keyword Args:
+            atmosphere: Alternative atmosphere object, if one is desired when
+                computing stagnation temperature and pressure ratios.
+
+        Returns:
+            The shaft power developed by the propulsion system, in Watts. If
+            norm = True, this is just the ratio of available power to a static
+            sea-level performance datum.
+
+        """
+        # Recast as necessary
+        mach = recastasnpfloatarray(mach)
+        altitude_m = recastasnpfloatarray(altitude_m)
+
+        mach, altitude_m = np.broadcast_arrays(mach, altitude_m)
+
+        if norm is not True:
+            errormsg = f"{cls.name} must use norm=True, found that {norm=}"
+            raise RuntimeError(errormsg)
+
+        # In lieu of a good empirical model, the thrust profile of a turbojet
+        # looks fairly similar...
+        lapse = Turbojet.thrust(mach=mach, altitude_m=altitude_m, **kwargs)
+
+        lapse[~(mach < 0.9)] = np.nan  # Invalidate M >= 0.9
+
+        return lapse
 
 
 class _BasicPropeller:
