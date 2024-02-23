@@ -25,7 +25,6 @@ class CSIABaseAeroplanes:
     Aeroplanes.
     """
     _categories: tuple
-    _re_paragraph = re.compile(r"^paragraph\d_[a-z]$")
     _make_Vn_data: typing.Callable
 
     def __init__(
@@ -68,7 +67,7 @@ class CSIABaseAeroplanes:
 
     def _report_compliance(self):
         paragraph_names = [
-            x for x in dir(self) if re.match(r"^paragraph\d_[a-z]$", x)]
+            x for x in dir(self) if re.match(r"^paragraph\d+_[a-z]$", x)]
         report = [getattr(self, x) for x in paragraph_names]
         return report
 
@@ -263,7 +262,7 @@ class CSIABaseAeroplanes:
         fig.suptitle(f"{type(self).__name__} V-n Diagram")
         fig.subplots_adjust(left=0.165, bottom=0.2)
         axtitle = (f"Type(s): {', '.join(data)} | "
-                   f"MTOW: {uc.N_kg(self.concept.design.weight_n):.0f} [kg]")
+                   f"MTOW: {uc.N_kg(self.concept.design.weight_n):,.0f} [kg]")
         ax.set_title(axtitle, fontsize="small")
 
         # ... manoeuvre and combined plots
@@ -339,6 +338,416 @@ class CSIABaseAeroplanes:
 
         return fig, ax
 
+
+class CAR3Nov49(CSIABaseAeroplanes):
+    """
+    A class for evaluating the initial airworthiness of an aircraft concept, as
+    per the CAR Part 3 certification specifications (CAR-3) amended November 1st
+    1949.
+
+    The specification is written for and applies to 'Normal', 'Utility', and
+    'Aerobatic' category aeroplanes. 'Restricted' category is unsupported at
+    this time. Presently, the main draw of the class is its support for
+    producing V-n diagrams.
+    """
+    _categories = ("normal", "utility", "aerobatic")
+
+    def _make_Vn_data(self,
+                      altitude_m=None,
+                      weightfraction=None,
+                      N: int = None
+                      ) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+        """
+        Create data for plotting V-n diagrams.
+
+        Args:
+            altitude_m: Altitude of operation.
+            weightfraction: Fraction of MTOW at which V-n should be considered.
+            N: The number of x-coordinates to generate (discretising speeds from
+             V=0 to dive speed, VD). Optional, defaults to 300 points.
+
+        Returns:
+            A tuple (altitude_m, weightfraction, Vndata), where the input arrays
+            have been broadcasted against each other, and with Vndata, for
+            convenience. Vndata is a class that itself contains a speeds class
+            'V' (in KEAS), and load factor classes 'n' and 'ng' for manoeuvre
+            and gust loads, respectively.
+
+        """
+        # Recast as necessary
+        if altitude_m is None:
+            altitude_m = 0
+        if weightfraction is None:
+            weightfraction = 1.0
+        N = 300 if N is None else int(N)
+
+        altitude_m = actools.recastasnpfloatarray(altitude_m)
+        weightfraction = actools.recastasnpfloatarray(weightfraction)
+
+        # Broadcast altitudes against weightfraction and then flatten
+        altitude_m, weightfraction \
+            = np.broadcast_arrays(altitude_m, weightfraction)
+        output_Vndata = {
+            category: np.empty(altitude_m.shape, dtype=object)
+            for category in self._categories
+        }
+
+        # Refactoring
+        CLmax = self.concept.performance.CLmax
+        CLmaxHL = np.nan
+        # Skip the warnings from trying to access undefined attributes
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if self.concept.performance.CLmaxHL is not None:
+                CLmaxHL = self.concept.performance.CLmaxHL
+        CLmin = self.concept.performance.CLmin
+        designatm = self.concept.designatm
+        funcs_ngminus1 = self.paragraph188_ngminus1
+        # MTOW (W/S)
+        wslim_pa = self.concept.design.weight_n / self.concept.cleanstall_Smin
+
+        for i in range(altitude_m.size):
+            alt_m = altitude_m.flat[i]
+            wfrac = weightfraction.flat[i]
+            ws_pa = wfrac * wslim_pa  # Current loading frac.
+
+            # Compute rho - even though CS requires ISA, we allow other atms.
+            rho = designatm.airdens_kgpm3(altitude_m=alt_m)
+
+            def loadfactor(keas, CL):
+                """Compute load factor n for equivalent airspeed and CL."""
+                # Compute true airspeed
+                ktas = designatm.EAS_TAS(eas=keas, altitude_m=alt_m)
+                mpstas = uc.kts_mps(speed_kts=ktas)
+
+                # L/W = n = q * CL / (W/S)
+                loadfactor_n = 0.5 * rho * mpstas ** 2 * CL / ws_pa
+                return loadfactor_n
+
+            f_npos = partial(loadfactor, CL=CLmax)
+            f_npos_flap = partial(loadfactor, CL=CLmaxHL)
+            f_nneg = partial(loadfactor, CL=CLmin)
+
+            for category in output_Vndata:
+
+                # ------------------------------------------------------------ #
+                # Equivalent Airspeeds (initial guesses based on minimums)
+                VC = self.paragraph184_VC[category]
+                VD = self.paragraph184_VDmin[category]
+                VAmano = self.paragraph184_VAmin[category](wfrac)
+                VGmano = self.paragraph184_VGmin[category](wfrac)
+                VF = self.paragraph190_VFmin
+                # Stall (and inverted stall) speed
+                VS = self.VS1 * (wfrac ** 0.5)
+                VSi = VS * (CLmax / abs(CLmin)) ** 0.5
+
+                # Find VA gust point (where stall curve meets the VC gust line)
+                def f_opt(V, gusttype, npos=True):
+                    """Optimisation func. for finding stall x gust crossing."""
+                    ng_m1 = funcs_ngminus1[category][gusttype](V, ws_pa, alt_m)
+                    if npos is True:
+                        n = f_npos(V)
+                        ng = 1 + ng_m1
+                    else:
+                        n = f_nneg(V)
+                        ng = 1 - ng_m1
+                    return n - ng
+
+                try:
+                    VAgust = sopt.newton(f_opt, VAmano, args=("C", True))
+                except RuntimeError:
+                    VAgust = np.nan
+                VA = np.nanmax((VAmano, VAgust))
+                # CAR 3.184:
+                VA = min(VA, VC)  # VA need not exceed VC
+
+                # Find VB gust point (where stall curve meets the VB gust line)
+                try:
+                    VB = sopt.newton(f_opt, VAmano, args=("B", True))
+                except RuntimeError:
+                    VB = np.nan
+
+                # CAR 3.184:
+                VB = min(VB, VC)  # VB need not exceed VC
+                # Using the built-in min() preserves the np.nan, if it is there
+
+                # Find VG gust point (inverted stall version of VA)
+                # Intersection point isn't guaranteed, like VA or VB is!
+                try:
+                    VGgust = sopt.newton(f_opt, VGmano, args=("C", False))
+                except RuntimeError:
+                    VGgust = np.nan
+                VG = np.nanmax((VGmano, VGgust))
+                # CAR 3.184:
+                # Technically this was for VA, but I think it applies anyway
+                VG = min(VG, VC)  # VG need not exceed VC
+
+                class Speeds:
+                    """V-n diagram speeds. Unless specified, units of KEAS."""
+                    xs = np.linspace(0, VD, num=N)
+                    A, B, C, D = VA, VB, VC, VD
+                    F = VF
+                    G = VG
+                    S, Si = VS, VSi
+
+                # ------------------------------------------------------------ #
+                # Load factor landmarks + curves (manoeuvre, gust, and combined)
+
+                # ... manoeuvring
+                nAmano = f_npos(keas=VA)
+                nGmano = f_nneg(keas=VG)
+                nEmano = 0
+                nFmano = self.paragraph190_nF
+
+                class ManoeuvreLoads:
+                    """V-n diagram manoeuvre load curves."""
+                    S_A = f_npos(keas=Speeds.xs)
+                    A_D = nAmano * np.ones(Speeds.xs.shape)
+                    Si_G = f_nneg(keas=Speeds.xs)
+                    G_F = nGmano * np.ones(Speeds.xs.shape)
+                    F_E = np.interp(Speeds.xs, [VC, VD], [nGmano, nEmano])
+                    flaps = np.clip(f_npos_flap(keas=Speeds.xs), None, nFmano)
+
+                # ... gusting
+                nBgust_m1 = funcs_ngminus1[category]["B"](VB, ws_pa, alt_m)
+                nCgust_m1 = funcs_ngminus1[category]["C"](VC, ws_pa, alt_m)
+                nDgust_m1 = funcs_ngminus1[category]["D"](VD, ws_pa, alt_m)
+
+                gust_args = (Speeds.xs, ws_pa, alt_m)
+                gust_m1B = funcs_ngminus1[category]["B"](*gust_args)
+                gust_m1C = funcs_ngminus1[category]["C"](*gust_args)
+                gust_m1D = funcs_ngminus1[category]["D"](*gust_args)
+
+                class GustLoads:
+                    """V-n diagram gust loads."""
+                    O_B = np.vstack((1 + gust_m1B, 1 - gust_m1B)).T
+                    O_C = np.vstack((1 + gust_m1C, 1 - gust_m1C)).T
+                    O_D = np.vstack((1 + gust_m1D, 1 - gust_m1D)).T
+                    B_m1 = nBgust_m1
+                    C_m1 = nCgust_m1
+                    D_m1 = nDgust_m1
+
+                class Vndata:
+                    """Data for plotting a V-n diagram."""
+                    V = Speeds
+                    n = ManoeuvreLoads
+                    ng = GustLoads
+
+                output_Vndata[category].flat[i] = Vndata
+
+        return altitude_m, weightfraction, output_Vndata
+
+
+    @property
+    def paragraph184_VC(self) -> dict[str, float]:
+        output = self._new_categories_dict()
+
+        VCmin = self.paragraph184_VCmin
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            VC_ktas = self.concept.brief.cruisespeed_ktas
+            alt_m = self.concept.brief.cruisealt_m
+
+        # If the design VC is not yet known, assume VCmin
+        if VC_ktas is None:
+            return VCmin
+
+        # Otherwise, knowledge of VC should imply knowledge of cruise altitude
+        if alt_m is None:
+            raise ValueError("Cruise speed was given in brief, but no altitude")
+        VC_keas = self.concept.designatm.TAS_EAS(tas=VC_ktas, altitude_m=alt_m)
+
+        # VC must be at least VCmin
+        for (category, _) in output.items():
+
+            output[category] = VC_keas  # Default value
+
+            if VC_keas < VCmin[category]:
+                warnmsg = (
+                    f"Cruise speed of {VC_keas} [KEAS] is below the minimum of "
+                    f"{VCmin[category]:.2f} [KEAS] for {category=} aircraft. "
+                    f"Clipping cruise speed to the minimum allowed value."
+                )
+                # Only bother warning the user if the category is relevant
+                if category in self.categories:
+                    warnings.warn(message=warnmsg, category=RuntimeWarning)
+                output[category] = VCmin[category]
+
+        return output
+    @property
+    def paragraph184_VCmin(self) -> dict[str, float]:
+        output = self._new_categories_dict()
+
+        # Assuming units of lbf/ft2
+        W = self.concept.design.weight_n
+        S = self.concept.cleanstall_Smin
+        ws_lbfpft2 = uc.Pa_lbfft2(W / S)
+
+        for (category, _) in output.items():
+            factor = 42 if category == "aerobatic" else 38
+            factor = np.interp(ws_lbfpft2, [20, 100], [factor, 33])
+            output[category] = factor * ws_lbfpft2 ** 0.5
+
+        return output
+
+    @property
+    def paragraph184_VDmin(self) -> dict[str, float]:
+        output = self._new_categories_dict()
+
+        VCmin_keas = self.paragraph184_VCmin
+        W = self.concept.design.weight_n
+        S = self.concept.cleanstall_Smin
+        ws_lbfpft2 = uc.Pa_lbfft2(W / S)
+
+        factors = {"utility": 1.50, "aerobatic": 1.55}
+
+        for (category, _) in output.items():
+            factor = factors.get(category, 1.40)
+            factor = np.interp(ws_lbfpft2, [20, 100], [factor, 1.35])
+            output[category] = factor * VCmin_keas[category]
+
+        return output
+
+    @property
+    def paragraph184_VAmin(self) -> dict[str, typing.Callable]:
+        n1 = self.paragraph186_a_n1
+        VS = self.VS1
+
+        def get_VAmin(n, weightfraction=None):
+            """Given manoeuvre load factor (and weight fraction), get VAmin."""
+            weightfraction = 1.0 if weightfraction is None else weightfraction
+            VAmin = VS * (n / weightfraction) ** 0.5
+            return VAmin
+
+        output = {
+            category: partial(get_VAmin, n)
+            for (category, n) in n1.items()
+        }
+
+        return output
+
+    @property
+    def paragraph184_VGmin(self) -> dict[str, typing.Callable]:
+        # warnmsg = f"No method exists for kcas -> keas, assuming CAS ~ EAS"
+        # warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
+        # (W/S) = 0.5 * rho * V^2 * CL
+        # ==> 2 * (W/S) / rho = V^2 * CL
+        VS = self.VS1
+        CLmax = self.concept.performance.CLmax
+        CLmin = self.concept.performance.CLmin
+        VSi = (VS ** 2 * CLmax / abs(CLmin)) ** 0.5
+
+        # Technically this is for VA, but I think it applies to VG too
+        def get_VGmin(n, weightfraction=None):
+            """Given manoeuvre load factor (and weight fraction), get VGmin."""
+            weightfraction = 1.0 if weightfraction is None else weightfraction
+            VGmin = VSi * (np.abs(n) / weightfraction) ** 0.5
+            return VGmin
+
+        n2 = self.paragraph186_b_n2
+        output = {
+            category: partial(get_VGmin, n)
+            for (category, n) in n2.items()
+        }
+
+        return output
+
+    @property
+    def paragraph186_a_n1(self) -> dict[str, float]:
+        output = self._new_categories_dict()
+
+        weight_n = self.concept.design.weight_n
+        weight_lb = uc.N_lbf(weight_n)
+        # paragraph186 (c) says the lower bound can be zero, like part 23 does
+        n1 = np.clip(2.1 + 24_000 / (weight_lb + 10_000), 0, 3.8)
+        output["normal"] = n1
+
+        output["utility"] = 4.4
+        output["aerobatic"] = 6.0
+
+        return output
+
+    @property
+    def paragraph186_b_n2(self) -> dict[str, float]:
+        output = self.paragraph186_a_n1
+
+        output["normal"] = -0.4 * output["normal"]
+        output["utility"] = -0.4 * output["utility"]
+        output["aerobatic"] = -0.5 * output["aerobatic"]
+
+        return output
+
+    @property
+    def paragraph187_Ude(self) -> dict[str, dict[str, float]]:
+        output = self._new_categories_dict()
+
+        u30fps, u15fps = uc.ft_m(30), uc.ft_m(15)
+        for (category, _) in output.items():
+            output[category] = dict([
+                ("B", u30fps),
+                ("C", u30fps),
+                ("D", u15fps)
+            ])
+
+        return output
+
+    @property
+    def paragraph188_ngminus1(self) -> dict[str, dict[str, typing.Callable]]:
+        output = self._new_categories_dict()
+
+        # Aeroplane mean geometric chord
+        Cbar = (self.concept.cleanstall_Smin
+                / self.concept.design.aspectratio) ** 0.5
+
+        CLalpha = self.concept.performance.CLalpha
+        rho0 = self.concept.designatm.airdens_kgpm3(altitude_m=0.0)
+
+        def mu_g(wingloading_pa, altitude_m):
+            """Aeroplane mass ratio, = function(wingloading, altitude)."""
+            rho = self.concept.designatm.airdens_kgpm3(altitude_m)
+            num = 2 * wingloading_pa
+            den = rho * Cbar * CLalpha * constants.g
+            return num / den
+
+        def kg(wingloading_pa, altitude_m):
+            """Gust alleviation factor, = function(wingloading, altitude)."""
+            massratio = mu_g(wingloading_pa, altitude_m)
+            num = 0.88 * massratio
+            den = 5.3 + massratio
+            return num / den
+
+        for category, speedsdict in self.paragraph187_Ude.items():
+
+            def one_pm_this(keas, wingloading_pa, altitude_m, Ude):
+                """Gust load factor: n = 1 +/- 'one_pm_this(...)'."""
+                mpseas = uc.kts_mps(speed_kts=keas)
+                gustfactor = kg(wingloading_pa, altitude_m)
+                num = gustfactor * rho0 * Ude * mpseas * CLalpha
+                den = 2 * wingloading_pa
+                return num / den
+
+            output[category] = dict()
+            for gusttype, Ude in speedsdict.items():
+                output[category][gusttype] = partial(one_pm_this, Ude=Ude)
+
+        return output
+
+    @property
+    def paragraph190_nF(self) -> float:
+        return 2.0
+
+    @property
+    def paragraph190_VFmin(self) -> typing.Callable:
+        VS1 = self.VS1  # MTOW stall, clean-config
+        VS0 = self.VS0  # MTOW stall, landing-config
+
+        def get_VFmin(weightfraction=None):
+            """Given optional parameter of weight fraction, get VFmin."""
+            weightfraction = 1.0 if weightfraction is None else weightfraction
+            VFmin = weightfraction ** 0.5 * max(1.4 * VS1, 1.8 * VS0)
+            return VFmin
+
+        return get_VFmin
 
 class CS23Amendment4(CSIABaseAeroplanes):
     """
@@ -447,9 +856,9 @@ class CS23Amendment4(CSIABaseAeroplanes):
                 VSi = VS * (CLmax / abs(CLmin)) ** 0.5
 
                 # Find VA gust point (where stall curve meets the VC gust line)
-                def f_opt(V, condition, npos=True):
+                def f_opt(V, gusttype, npos=True):
                     """Optimisation func. for finding stall x gust crossing."""
-                    ng_m1 = funcs_ngminus1[category][condition](V, ws_pa, alt_m)
+                    ng_m1 = funcs_ngminus1[category][gusttype](V, ws_pa, alt_m)
                     if npos is True:
                         n = f_npos(V)
                         ng = 1 + ng_m1
@@ -1029,8 +1438,8 @@ class CS23Amendment4(CSIABaseAeroplanes):
                 return num / den
 
             output[category] = dict()
-            for condition, Ude in speedsdict.items():
-                output[category][condition] = partial(one_pm_this, f_Ude=Ude)
+            for gusttype, Ude in speedsdict.items():
+                output[category][gusttype] = partial(one_pm_this, f_Ude=Ude)
 
         return output
 
@@ -1177,9 +1586,9 @@ class CS25Amendment28(CSIABaseAeroplanes):
                 VSi = VS * (CLmax / abs(CLmin)) ** 0.5
 
                 # Find VA gust point (where stall curve meets the VC gust line)
-                def f_opt(V, condition, npos=True):
+                def f_opt(V, gusttype, npos=True):
                     """Optimisation func. for finding stall x gust crossing."""
-                    ng_m1 = funcs_ngminus1[category][condition](V, ws_pa, alt_m)
+                    ng_m1 = funcs_ngminus1[category][gusttype](V, ws_pa, alt_m)
                     if npos is True:
                         n = f_npos(V)
                         ng = 1 + ng_m1
@@ -1193,7 +1602,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
                 except RuntimeError:
                     VAgust = np.nan
                 VA = np.nanmax((VAmano, VAgust))
-                # CS 23.335 Design airspeeds. Sub-paragraph (c). Item (2):
+                # CS 25.335 Design airspeeds. Sub-paragraph (c). Item (3):
                 VA = min(VA, VC)  # VA need not exceed VC
 
                 # Find VB gust point (where stall curve meets the VB gust line)
@@ -1202,7 +1611,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
                 except RuntimeError:
                     VB = np.nan
 
-                # CS 23.335 Design airspeeds. Sub-paragraph (d). Item (2):
+                # CS 25.335 Design airspeeds. Sub-paragraph (d). Item (2):
                 VB = min(VB, VC)  # VB need not exceed VC
                 # Using the built-in min() preserves the np.nan, if it is there
 
@@ -1213,7 +1622,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
                 except RuntimeError:
                     VGgust = np.nan
                 VG = np.nanmax((VGmano, VGgust))
-                # CS 23.335 Design airspeeds. Sub-paragraph (c). Item (2):
+                # CS 25.335 Design airspeeds. Sub-paragraph (c). Item (2):
                 # Technically this was for VA, but I think it applies anyway
                 VG = min(VG, VC)  # VG need not exceed VC
 
@@ -1414,7 +1823,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
     @property
     def paragraph335_c_VAmin(self) -> dict[str, typing.Callable]:
         """
-        CS 23.335 Design airspeeds.
+        CS 25.335 Design airspeeds.
         Sub-paragraph (c).
 
         Returns:
@@ -1441,7 +1850,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
     @property
     def paragraph335_c_VGmin(self) -> dict[str, typing.Callable]:
         """
-        CS 23.335 Design airspeeds.
+        CS 25.335 Design airspeeds.
         Sub-paragraph (c).
 
         Returns:
@@ -1471,7 +1880,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
 
     def paragraph335_d_VBmin(self, altitude_m, weightfraction=None) -> float:
         """
-        CS 23.335 Design airspeeds.
+        CS 25.335 Design airspeeds.
         Sub-paragraph (d).
 
         Args:
@@ -1726,8 +2135,8 @@ class CS25Amendment28(CSIABaseAeroplanes):
             return num / den
 
         output = dict([("large", dict())])
-        for condition, Ude in self.paragraph341_a_Uref["large"].items():
-            output["large"][condition] = partial(one_pm_this, f_Ude=Ude)
+        for gusttype, Ude in self.paragraph341_a_Uref["large"].items():
+            output["large"][gusttype] = partial(one_pm_this, f_Ude=Ude)
 
         return output
 
