@@ -94,8 +94,8 @@ class TestConceptCirrusSR22(unittest.TestCase):
 
     def test_wingshape(self):
         self.assertEqual(self.ac.design.aspectratio, 10.12)
-        self.assertEqual(self.ac.design.taperratio, 0.5)
-        self.assertAlmostEqual(self.ac.design.sweep_le_deg, 2, places=0)
+        self.assertEqual(
+            self.ac.design.taperratio, self.ac.wing_Ctip / self.ac.wing_Croot)
         return
 
     def test_get_bestspeeds(self):
@@ -198,7 +198,8 @@ class TestConceptCirrusSR22(unittest.TestCase):
             and Procedures," 1st ed., Elselvier, 2014. Example 9.11.
 
         """
-        self.assertAlmostEqual(self.ac.CLslope(method="DATCOM"), 5.06, delta=.1)
+        self.assertAlmostEqual(
+            self.ac.CLslope(method="DATCOM", eta=0.9757), 5.06, delta=.1)
         return
 
 

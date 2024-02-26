@@ -218,7 +218,7 @@ class CSIABaseAeroplanes:
 
         return VS0
 
-    def plot_Vn(self, altitude_m=None, weightfraction: float =None, N: int=None):
+    def plot_Vn(self, altitude_m=None, weightfraction: float = None, N: int = None):
         """
         Make a pretty figure with the limit manoeuvre and the limit gust
         envelopes.
@@ -309,6 +309,10 @@ class CSIABaseAeroplanes:
         gustB = np.array(((0, 0), (big_gusto.V.B, big_gusto.ng.B_m1)))
         gustC = np.array(((0, 0), (big_gusto.V.C, big_gusto.ng.C_m1)))
         gustD = np.array(((0, 0), (big_gusto.V.D, big_gusto.ng.D_m1)))
+        # If the penetration gust (B type) is weaker than maneouvre loading...
+        if 1 + big_gusto.ng.B_m1 < big_gusto.n.A_D.flat[0]:
+            gustB *= np.nan  # It shouldn't be plotted (confuses the diagram)
+
         style = {"ls": "dashdot", "c": "k", "lw": 0.7, "alpha": 0.4}
         for (gust, sign) in product([gustB, gustC, gustD], [1, -1]):
             ax.axline(*(origin + np.array([1, sign]) * gust), **style)
@@ -404,7 +408,7 @@ class CAR3Nov49(CSIABaseAeroplanes):
         designatm = self.concept.designatm
         funcs_ngminus1 = self.paragraph188_ngminus1
         # MTOW (W/S)
-        wslim_pa = self.concept.design.weight_n / self.concept.cleanstall_Smin
+        wslim_pa = self.concept.design.weight_n / self.concept.wing_Sref
 
         for i in range(altitude_m.size):
             alt_m = altitude_m.flat[i]
@@ -454,8 +458,8 @@ class CAR3Nov49(CSIABaseAeroplanes):
                     return n - ng
 
                 try:
-                    VAgust = sopt.newton(f_opt, VAmano, args=("C", True))
-                except RuntimeError:
+                    VAgust = sopt.brentq(f_opt, VS, VD, args=("C", True))
+                except (RuntimeError, ValueError):
                     VAgust = np.nan
                 VA = np.nanmax((VAmano, VAgust))
                 # CAR 3.184:
@@ -463,8 +467,8 @@ class CAR3Nov49(CSIABaseAeroplanes):
 
                 # Find VB gust point (where stall curve meets the VB gust line)
                 try:
-                    VB = sopt.newton(f_opt, VAmano, args=("B", True))
-                except RuntimeError:
+                    VB = sopt.brentq(f_opt, VS, VD, args=("B", True))
+                except (RuntimeError, ValueError):
                     VB = np.nan
 
                 # CAR 3.184:
@@ -474,8 +478,8 @@ class CAR3Nov49(CSIABaseAeroplanes):
                 # Find VG gust point (inverted stall version of VA)
                 # Intersection point isn't guaranteed, like VA or VB is!
                 try:
-                    VGgust = sopt.newton(f_opt, VGmano, args=("C", False))
-                except RuntimeError:
+                    VGgust = sopt.brentq(f_opt, VSi, VD, args=("C", False))
+                except (RuntimeError, ValueError):
                     VGgust = np.nan
                 VG = np.nanmax((VGmano, VGgust))
                 # CAR 3.184:
@@ -574,13 +578,14 @@ class CAR3Nov49(CSIABaseAeroplanes):
                 output[category] = VCmin[category]
 
         return output
+
     @property
     def paragraph184_VCmin(self) -> dict[str, float]:
         output = self._new_categories_dict()
 
         # Assuming units of lbf/ft2
         W = self.concept.design.weight_n
-        S = self.concept.cleanstall_Smin
+        S = self.concept.wing_Sref
         ws_lbfpft2 = uc.Pa_lbfft2(W / S)
 
         for (category, _) in output.items():
@@ -596,7 +601,7 @@ class CAR3Nov49(CSIABaseAeroplanes):
 
         VCmin_keas = self.paragraph184_VCmin
         W = self.concept.design.weight_n
-        S = self.concept.cleanstall_Smin
+        S = self.concept.wing_Sref
         ws_lbfpft2 = uc.Pa_lbfft2(W / S)
 
         factors = {"utility": 1.50, "aerobatic": 1.55}
@@ -696,22 +701,20 @@ class CAR3Nov49(CSIABaseAeroplanes):
         output = self._new_categories_dict()
 
         # Aeroplane mean geometric chord
-        Cbar = (self.concept.cleanstall_Smin
-                / self.concept.design.aspectratio) ** 0.5
+        Cbar = (self.concept.wing_Sref / self.concept.design.aspectratio) ** 0.5
 
-        CLalpha = self.concept.performance.CLalpha
         rho0 = self.concept.designatm.airdens_kgpm3(altitude_m=0.0)
 
-        def mu_g(wingloading_pa, altitude_m):
+        def mu_g(wingloading_pa, altitude_m, CLalpha):
             """Aeroplane mass ratio, = function(wingloading, altitude)."""
             rho = self.concept.designatm.airdens_kgpm3(altitude_m)
             num = 2 * wingloading_pa
             den = rho * Cbar * CLalpha * constants.g
             return num / den
 
-        def kg(wingloading_pa, altitude_m):
+        def kg(wingloading_pa, altitude_m, CLalpha):
             """Gust alleviation factor, = function(wingloading, altitude)."""
-            massratio = mu_g(wingloading_pa, altitude_m)
+            massratio = mu_g(wingloading_pa, altitude_m, CLalpha)
             num = 0.88 * massratio
             den = 5.3 + massratio
             return num / den
@@ -720,8 +723,12 @@ class CAR3Nov49(CSIABaseAeroplanes):
 
             def one_pm_this(keas, wingloading_pa, altitude_m, Ude):
                 """Gust load factor: n = 1 +/- 'one_pm_this(...)'."""
+                CLalpha = self.concept.CLslope(
+                    method="DATCOM",
+                    mach=uc.kts_mps(keas) / 340.3  # EAS means standard day SL
+                )
                 mpseas = uc.kts_mps(speed_kts=keas)
-                gustfactor = kg(wingloading_pa, altitude_m)
+                gustfactor = kg(wingloading_pa, altitude_m, CLalpha)
                 num = gustfactor * rho0 * Ude * mpseas * CLalpha
                 den = 2 * wingloading_pa
                 return num / den
@@ -818,7 +825,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
         designatm = self.concept.designatm
         funcs_ngminus1 = self.paragraph341_c_ngminus1
         # MTOW (W/S)
-        wslim_pa = self.concept.design.weight_n / self.concept.cleanstall_Smin
+        wslim_pa = self.concept.design.weight_n / self.concept.wing_Sref
 
         for i in range(altitude_m.size):
             alt_m = altitude_m.flat[i]
@@ -868,8 +875,8 @@ class CS23Amendment4(CSIABaseAeroplanes):
                     return n - ng
 
                 try:
-                    VAgust = sopt.newton(f_opt, VAmano, args=("C", True))
-                except RuntimeError:
+                    VAgust = sopt.brentq(f_opt, VS, VD, args=("C", True))
+                except (RuntimeError, ValueError):
                     VAgust = np.nan
                 VA = np.nanmax((VAmano, VAgust))
                 # CS 23.335 Design airspeeds. Sub-paragraph (c). Item (2):
@@ -878,8 +885,8 @@ class CS23Amendment4(CSIABaseAeroplanes):
                 # Find VB gust point (where stall curve meets the VB gust line)
                 if category == "commuter":
                     try:
-                        VB = sopt.newton(f_opt, VAmano, args=("B", True))
-                    except RuntimeError:
+                        VB = sopt.brentq(f_opt, VS, VD, args=("B", True))
+                    except (RuntimeError, ValueError):
                         VB = np.nan
                 else:
                     VB = np.nan
@@ -890,8 +897,8 @@ class CS23Amendment4(CSIABaseAeroplanes):
                 # Find VG gust point (inverted stall version of VA)
                 # Intersection point isn't guaranteed, like VA or VB is!
                 try:
-                    VGgust = sopt.newton(f_opt, VGmano, args=("C", False))
-                except RuntimeError:
+                    VGgust = sopt.brentq(f_opt, VSi, VD, args=("C", False))
+                except (RuntimeError, ValueError):
                     VGgust = np.nan
                 VG = np.nanmax((VGmano, VGgust))
                 # CS 23.335 Design airspeeds. Sub-paragraph (c). Item (2):
@@ -1165,7 +1172,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
 
         # Items (1) and (2)
         W = self.concept.design.weight_n
-        S = self.concept.cleanstall_Smin
+        S = self.concept.wing_Sref
         ws_lbfpft2 = uc.Pa_lbfft2(W / S)
 
         for (category, _) in output.items():
@@ -1221,7 +1228,7 @@ class CS23Amendment4(CSIABaseAeroplanes):
         # Items (2) and (3)
         VCmin_keas = self.paragraph335_a_VCmin
         W = self.concept.design.weight_n
-        S = self.concept.cleanstall_Smin
+        S = self.concept.wing_Sref
         ws_lbfpft2 = uc.Pa_lbfft2(W / S)
 
         factors = {"utility": 1.50, "aerobatic": 1.55}
@@ -1407,22 +1414,21 @@ class CS23Amendment4(CSIABaseAeroplanes):
         output = self._new_categories_dict()
 
         # Aeroplane mean geometric chord
-        Cbar = (self.concept.cleanstall_Smin
+        Cbar = (self.concept.wing_Sref
                 / self.concept.design.aspectratio) ** 0.5
 
-        CLalpha = self.concept.performance.CLalpha
         rho0 = self.concept.designatm.airdens_kgpm3(altitude_m=0.0)
 
-        def mu_g(wingloading_pa, altitude_m):
+        def mu_g(wingloading_pa, altitude_m, CLalpha):
             """Aeroplane mass ratio, = function(wingloading, altitude)."""
             rho = self.concept.designatm.airdens_kgpm3(altitude_m)
             num = 2 * wingloading_pa
             den = rho * Cbar * CLalpha * constants.g
             return num / den
 
-        def kg(wingloading_pa, altitude_m):
+        def kg(wingloading_pa, altitude_m, CLalpha):
             """Gust alleviation factor, = function(wingloading, altitude)."""
-            massratio = mu_g(wingloading_pa, altitude_m)
+            massratio = mu_g(wingloading_pa, altitude_m, CLalpha)
             num = 0.88 * massratio
             den = 5.3 + massratio
             return num / den
@@ -1431,8 +1437,12 @@ class CS23Amendment4(CSIABaseAeroplanes):
 
             def one_pm_this(keas, wingloading_pa, altitude_m, f_Ude):
                 """Gust load factor: n = 1 +/- 'one_pm_this(...)'."""
+                CLalpha = self.concept.CLslope(
+                    method="DATCOM",
+                    mach=uc.kts_mps(keas) / 340.3  # EAS means standard day SL
+                )
                 mpseas = uc.kts_mps(speed_kts=keas)
-                gustfactor = kg(wingloading_pa, altitude_m)
+                gustfactor = kg(wingloading_pa, altitude_m, CLalpha)
                 num = gustfactor * rho0 * f_Ude(altitude_m) * mpseas * CLalpha
                 den = 2 * wingloading_pa
                 return num / den
@@ -1548,7 +1558,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
         designatm = self.concept.designatm
         funcs_ngminus1 = self.ngminus1
         # MTOW (W/S)
-        wslim_pa = self.concept.design.weight_n / self.concept.cleanstall_Smin
+        wslim_pa = self.concept.design.weight_n / self.concept.wing_Sref
 
         for i in range(altitude_m.size):
             alt_m = altitude_m.flat[i]
@@ -1598,8 +1608,8 @@ class CS25Amendment28(CSIABaseAeroplanes):
                     return n - ng
 
                 try:
-                    VAgust = sopt.newton(f_opt, VAmano, args=("C", True))
-                except RuntimeError:
+                    VAgust = sopt.brentq(f_opt, VS, VD, args=("C", True))
+                except (RuntimeError, ValueError):
                     VAgust = np.nan
                 VA = np.nanmax((VAmano, VAgust))
                 # CS 25.335 Design airspeeds. Sub-paragraph (c). Item (3):
@@ -1607,8 +1617,8 @@ class CS25Amendment28(CSIABaseAeroplanes):
 
                 # Find VB gust point (where stall curve meets the VB gust line)
                 try:
-                    VB = sopt.newton(f_opt, VAmano, args=("B", True))
-                except RuntimeError:
+                    VB = sopt.brentq(f_opt, VS, VD, args=("B", True))
+                except (RuntimeError, ValueError):
                     VB = np.nan
 
                 # CS 25.335 Design airspeeds. Sub-paragraph (d). Item (2):
@@ -1618,8 +1628,8 @@ class CS25Amendment28(CSIABaseAeroplanes):
                 # Find VG gust point (inverted stall version of VA)
                 # Intersection point isn't guaranteed, like VA or VB is!
                 try:
-                    VGgust = sopt.newton(f_opt, VGmano, args=("C", False))
-                except RuntimeError:
+                    VGgust = sopt.brentq(f_opt, VSi, VD, args=("C", False))
+                except (RuntimeError, ValueError):
                     VGgust = np.nan
                 VG = np.nanmax((VGmano, VGgust))
                 # CS 25.335 Design airspeeds. Sub-paragraph (c). Item (2):
@@ -1909,13 +1919,15 @@ class CS25Amendment28(CSIABaseAeroplanes):
         Uref = self.paragraph341_a_Uref["large"]["B"](altitude_m)
 
         # Aeroplane mean geometric chord
-        Cbar = (self.concept.cleanstall_Smin
-                / self.concept.design.aspectratio) ** 0.5
+        Cbar = (self.concept.wing_Sref / self.concept.design.aspectratio) ** 0.5
 
-        CLalpha = self.concept.performance.CLalpha
+        CLalpha = self.concept.CLslope(
+            method="DATCOM",
+            mach=uc.kts_mps(VC_keas) / 340.3  # EAS means standard day SL
+        )
 
         # Average MTOW wing loading
-        wsMTOW = self.concept.design.weight_n / self.concept.cleanstall_Smin
+        wsMTOW = self.concept.design.weight_n / self.concept.wing_Sref
         ws = wsMTOW * weightfraction
 
         # Aeroplane mass ratio
@@ -1979,7 +1991,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
     @property
     def paragraph337_b_n2(self) -> dict[str, float]:
         """
-        CS 23.337 Limit manoeuvring load factors.
+        CS 25.337 Limit manoeuvring load factors.
         Sub-paragraph (c).
 
         Returns:
@@ -2026,7 +2038,7 @@ class CS25Amendment28(CSIABaseAeroplanes):
     @property
     def paragraph341_a_Fg(self) -> typing.Callable:
         """
-        CS 23.341 Gust load factors.
+        CS 25.341 Gust load factors.
         Sub-paragraph (a).
 
         Returns:
@@ -2107,29 +2119,32 @@ class CS25Amendment28(CSIABaseAeroplanes):
 
         """
         # Aeroplane mean geometric chord
-        Cbar = (self.concept.cleanstall_Smin / self.concept.design.aspectratio) ** 0.5
+        Cbar = (self.concept.wing_Sref / self.concept.design.aspectratio) ** 0.5
 
-        CLalpha = self.concept.performance.CLalpha
         rho0 = self.concept.designatm.airdens_kgpm3(altitude_m=0.0)
 
-        def mu_g(wingloading_pa, altitude_m):
+        def mu_g(wingloading_pa, altitude_m, CLalpha):
             """Aeroplane mass ratio, = function(wingloading, altitude)."""
             rho = self.concept.designatm.airdens_kgpm3(altitude_m)
             num = 2 * wingloading_pa
             den = rho * Cbar * CLalpha * constants.g
             return num / den
 
-        def kg(wingloading_pa, altitude_m):
+        def kg(wingloading_pa, altitude_m, CLalpha):
             """Gust alleviation factor, = function(wingloading, altitude)."""
-            massratio = mu_g(wingloading_pa, altitude_m)
+            massratio = mu_g(wingloading_pa, altitude_m, CLalpha)
             num = 0.88 * massratio
             den = 5.3 + massratio
             return num / den
 
         def one_pm_this(keas, wingloading_pa, altitude_m, f_Ude):
             """Gust load factor: n = 1 +/- 'one_pm_this(...)'."""
+            CLalpha = self.concept.CLslope(
+                method="DATCOM",
+                mach=uc.kts_mps(keas) / 340.3  # EAS means standard day SL
+            )
             mpseas = uc.kts_mps(speed_kts=keas)
-            gustfactor = kg(wingloading_pa, altitude_m)
+            gustfactor = kg(wingloading_pa, altitude_m, CLalpha)
             num = gustfactor * rho0 * f_Ude(altitude_m) * mpseas * CLalpha
             den = 2 * wingloading_pa
             return num / den

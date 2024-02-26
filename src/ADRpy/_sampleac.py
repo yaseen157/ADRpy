@@ -34,7 +34,8 @@ def Cirrus_SR22():
     }
 
     designdefinition = {
-        "aspectratio": 10.12, "taperratio": 0.5,  # Wing "slenderness"
+        "aspectratio": 10.12, "taperratio": 2.59 / 4.88,  # Wing "slenderness"
+        "dfus_b": 0.1089,  # Fuselage width fraction (to wingspan)
         "sweep_mt_deg": 0.0,  # Main spar sweep
         "weight_n": uc.lbf_N(3600),  # Weight estimate
         "weightfractions": {"cruise": 3400 / 3600}  # Weight fractions
