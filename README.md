@@ -119,9 +119,11 @@ At the top of the GitHub page is a green `Code` dropdown.
 Download the .zip file and unpackage ADRpy into a directory you'd like to
 install it into.
 
-Start a command prompt window at this location, and enter the ADRpy directory:
+Start a command prompt window at this location, and enter the ADRpy directory 
+(it might be called `ADRpy-master`, or whatever branch of the source code you
+downloaded):
 
-    $ cd ./ADRpy
+    $ cd ./ADRpy-master
 
 When you are in the ADRpy root folder, you can type the following to install
 ADRpy:
