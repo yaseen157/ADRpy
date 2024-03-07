@@ -1486,6 +1486,8 @@ class AircraftConcept:
 
         return bestCL, LDratio
 
+
+
     def constrain_climb(self, wingloading_pa, **kwargs):
         """
         Compute the thrust-to-weight and the power-to-weight (if applicable)
@@ -1573,6 +1575,55 @@ class AircraftConcept:
         pw = (tw * tcorr) * climbspeed_mpstas / pcorr
 
         return tw, pw
+
+    @revert2scalar
+    def get_CL_cruise(self, wingloading_pa, **kwargs):
+        """
+        Finds the CL (and L/D ratio) for the cruising conditions that are
+        defined in the concept's design mission brief.
+
+        Args:
+            wingloading_pa: MTOW wing loading, in Pascal.
+
+        Returns:
+            Tuple of (the best coefficient of lift, L/D ratio at this CL).
+
+        """
+        # Recast as necessary
+        wingloading_pa = recastasnpfloatarray(wingloading_pa)
+        cruisealt_m = kwargs.get("cruisealt_m", self.brief.cruisealt_m)
+        cruisespeed_ktas = kwargs.get(
+            "cruisespeed_ktas", self.brief.cruisespeed_ktas)
+        CDmin = kwargs.get("CDmin", self.performance.CDmin)
+        CLmax = kwargs.get("CLmax", self.performance.CLmax)
+        CLminD = kwargs.get("CLminD", self.performance.CLminD)
+        methods = kwargs.get("methods", dict())
+
+        # Determine the thrust and power lapse corrections
+        cruisespeed_mpstas = co.kts_mps(cruisespeed_ktas)
+        mach = cruisespeed_mpstas / self.designatm.vsound_mps(cruisealt_m)
+
+        # Determine the weight lapse (relative to MTOW) correction
+        wcorr = self.design.weightfractions["cruise"]
+
+        # Compute cruise constraint
+        # ... (upper bounded) wing loading
+        q_pa = self.designatm.dynamicpressure_pa(
+            airspeed_mps=cruisespeed_mpstas, altitude_m=cruisealt_m)
+        ws_pa = wingloading_pa * wcorr
+        wslim_pa = CLmax * q_pa
+        if (ws_pa > wslim_pa).any():
+            # warnmsg = f"Wing loading exceeded limit of {wslim_pa:.0f} Pascal!"
+            # warnings.warn(warnmsg, RuntimeWarning, stacklevel=2)
+            ws_pa[ws_pa > wslim_pa] = np.nan
+
+        # ... coefficient of drag
+        k = self.cdi_factor(mach=mach, method=methods.get("cdi_factor"))
+        f_CD = make_modified_drag_model(CDmin, k, CLmax, CLminD)
+        CL = ws_pa / q_pa
+        CD = f_CD(CL)
+
+        return CL, CL / CD
 
     def constrain_cruise(self, wingloading_pa, **kwargs):
         """
