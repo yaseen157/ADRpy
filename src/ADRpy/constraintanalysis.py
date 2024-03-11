@@ -934,7 +934,7 @@ class AircraftConcept:
 
             # Transonic 3D lift-curve slope (unavailable right now)
             if np.isnan(CLalpha).any():
-                warnmsg = f"CLalpha couldn't be computed for transonic case "
+                warnmsg = f"CLalpha couldn't be computed for case "
                 if CLalpha.size == 1:
                     warnmsg += f"(M = {mach.item():.2f})"
                 else:
@@ -968,6 +968,7 @@ class AircraftConcept:
                 'Obert', for Oswald span efficiency, e0;
                 'Kroo', for Oswald span efficiency, e0;
                 'Douglas', for Oswald span efficiency, e0;
+                'Raymer', for Oswald span efficiency, e0;
 
         Returns:
             Estimate for induced drag factor, k.
@@ -1917,7 +1918,7 @@ class AircraftConcept:
         # Determine the weight lapse (relative to MTOW) correction
         wcorr = self.design.weightfractions["turn"]
 
-        # Compute climb constraint
+        # Compute turn constraint
         # ... (upper bounded) wing loading
         q_pa = self.designatm.dynamicpressure_pa(
             airspeed_mps=turnspeed_mpstas, altitude_m=turnalt_m)
