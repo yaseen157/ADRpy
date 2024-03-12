@@ -24,7 +24,8 @@ engine_data_path = (
     os.path.join(os.path.dirname(__file__), "data", "engine_data"))
 engine_deck_types = [
     x for x in os.listdir(engine_data_path)  # List all directories on path...
-    if os.path.isdir(x) and not x.startswith(".")  # if they are public folders
+    if os.path.isdir(os.path.join(engine_data_path, x))
+       and not x.startswith(".")
 ]
 
 # Catalogue (paths to) decks
