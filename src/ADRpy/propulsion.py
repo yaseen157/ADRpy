@@ -22,7 +22,10 @@ __author__ = "Yaseen Reza"
 # Locate engine decks
 engine_data_path = (
     os.path.join(os.path.dirname(__file__), "data", "engine_data"))
-engine_deck_types = os.listdir(engine_data_path)
+engine_deck_types = [
+    x for x in os.listdir(engine_data_path)  # List all directories on path...
+    if os.path.isdir(x) and not x.startswith(".")  # if they are public folders
+]
 
 # Catalogue (paths to) decks
 engine_catalogue = dict()
