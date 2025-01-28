@@ -29,7 +29,7 @@
 
 ---
 
-ADRpy is an academic, teaching resource containing aircraft conceptual design
+ADRpy is an academic teaching resource containing aircraft conceptual design
 and performance analysis tools such as:
 
 - Virtual (design) atmospheres
@@ -39,7 +39,7 @@ and performance analysis tools such as:
 - *and much more...*
 
 For a detailed description of the library, please consult the
-[Documentation](https://adrpy.readthedocs.io/en/latest/). To get started,
+[Documentation*](https://adrpy.readthedocs.io/en/latest/). To get started,
 follow the instructions below.
 
 For video tutorials and explainers (a.k.a. *ADRpy Shorts*) scroll to the bottom
@@ -48,13 +48,8 @@ of this page.
 Components of this library are written to be both easy to read and modify
 without requiring significant coding knowledge.
 
-[//]: # (Confident coders looking for a)
-
-[//]: # (more flexible and expandable library architecture may wish to check out ADRpy's)
-
-[//]: # (companion library [CARPy]&#40;https://github.com/yaseen157/carpy/tree/main&#41; &#40;)
-
-[//]: # (currently a work in progress!&#41;.)
+> \* The PyPI version of this library may not match the version you find in GitHub. If you cloned the code source from
+> GitHub, then the [documentation section](docs) of the GitHub is your best path to up-to-date information. 
 
 ---
 
